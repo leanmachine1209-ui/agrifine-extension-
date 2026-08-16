@@ -1,0 +1,455 @@
+:root {
+  --pad: 8px;
+  --gap: 4px;
+  --board-max: 480px;
+  --card-w: calc((min(100vw, var(--board-max)) - 2 * var(--pad) - 6 * var(--gap)) / 7);
+  --card-h: calc(var(--card-w) * 1.42);
+  --radius: calc(var(--card-w) * 0.14);
+  --fan: calc(var(--card-h) * -0.66);
+  --fan-down: calc(var(--card-h) * -0.78);
+
+  --gold: #d97706;
+  --gold-deep: #b45309;
+  --red: #dc2626;
+  --soil: #6b4423;
+  --soil-dark: #4a2f18;
+  --grass-1: #4ade80;
+  --grass-2: #16a34a;
+  --panel: rgba(255, 255, 255, 0.92);
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: #14311c;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+body {
+  background:
+    radial-gradient(120% 60% at 50% -10%, #bae6fd 0%, #7dd3fc 30%, transparent 60%),
+    linear-gradient(180deg, #86efac 0%, #4ade80 26%, #22c55e 52%, #15803d 100%);
+}
+
+#app {
+  height: 100%;
+}
+
+.game {
+  height: 100%;
+  max-width: var(--board-max);
+  margin: 0 auto;
+  padding: max(var(--pad), env(safe-area-inset-top)) var(--pad) var(--pad);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ── Top bar / HUD ─────────────────────────────────────────────── */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.brand {
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  font-size: clamp(15px, 4.5vw, 20px);
+  color: #052e16;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+  white-space: nowrap;
+}
+.brand-mark {
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.2));
+}
+.hud {
+  display: flex;
+  gap: 4px;
+}
+.stat {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--panel);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: clamp(11px, 3vw, 13px);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+.stat b {
+  font-variant-numeric: tabular-nums;
+}
+.stat-ico {
+  font-size: 0.95em;
+}
+
+/* ── Farm growth panel ─────────────────────────────────────────── */
+.farm {
+  background: var(--panel);
+  border-radius: 14px;
+  padding: 8px 10px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+.farm-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  color: #14532d;
+  margin-bottom: 5px;
+}
+.farm-pct {
+  color: var(--gold-deep);
+}
+.growth-bar {
+  height: 7px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.growth-bar > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--grass-1), var(--grass-2));
+  transition: width 0.4s ease;
+}
+.plots {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+.plot {
+  background: linear-gradient(180deg, #fef3c7, #fde68a);
+  border: 1px solid #f59e0b33;
+  border-radius: 10px;
+  padding: 4px 2px 3px;
+  text-align: center;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.plot-crop {
+  font-size: clamp(18px, 6vw, 26px);
+  line-height: 1.1;
+}
+.plot-bar {
+  height: 4px;
+  background: #00000015;
+  border-radius: 999px;
+  margin: 2px 4px;
+  overflow: hidden;
+}
+.plot-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--gold);
+  transition: width 0.4s ease;
+}
+.plot-name {
+  font-size: 9px;
+  font-weight: 700;
+  color: #7c5a12;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.plot.is-mature {
+  background: linear-gradient(180deg, #fde68a, #fbbf24);
+  box-shadow: 0 0 0 2px #f59e0b, 0 0 12px #fbbf24aa;
+  animation: pop 0.4s ease;
+}
+
+/* ── Stock / waste / silos ─────────────────────────────────────── */
+.uppers {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+.stockwaste,
+.silos {
+  display: flex;
+  gap: var(--gap);
+}
+.pile,
+.silo,
+.tableau-pile {
+  width: var(--card-w);
+}
+.pile,
+.silo {
+  height: var(--card-h);
+  border-radius: var(--radius);
+}
+.stock,
+.waste,
+.silo {
+  border: 2px dashed rgba(255, 255, 255, 0.55);
+  background: rgba(0, 0, 0, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.stock {
+  cursor: pointer;
+  background: linear-gradient(180deg, var(--soil), var(--soil-dark));
+  border-style: solid;
+  border-color: #3f2a15;
+}
+.stock .card-back {
+  font-size: calc(var(--card-w) * 0.5);
+}
+.stock-count {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px #000;
+}
+.recycle {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: calc(var(--card-w) * 0.55);
+}
+.silo.is-target {
+  border-color: #bbf7d0;
+  box-shadow: 0 0 0 3px #22c55e, 0 0 12px #22c55eaa;
+  background: rgba(34, 197, 94, 0.25);
+}
+.slot-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: calc(var(--card-w) * 0.42);
+}
+.slot-empty small {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ── Tableau ───────────────────────────────────────────────────── */
+.tableau {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: var(--gap);
+  align-content: start;
+  overflow-y: auto;
+  padding-bottom: 4px;
+}
+.tableau-pile {
+  display: flex;
+  flex-direction: column;
+  min-height: var(--card-h);
+  border-radius: var(--radius);
+}
+.tableau-pile.is-target {
+  outline: 3px solid #22c55e;
+  outline-offset: 1px;
+  border-radius: var(--radius);
+  background: rgba(34, 197, 94, 0.18);
+}
+.plot-empty {
+  height: var(--card-h);
+  border: 2px dashed rgba(255, 255, 255, 0.4);
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.1);
+}
+.tableau-pile .card + .card {
+  margin-top: var(--fan);
+}
+.tableau-pile .card--down + .card {
+  margin-top: var(--fan-down);
+}
+
+/* ── Cards ─────────────────────────────────────────────────────── */
+.card {
+  width: var(--card-w);
+  height: var(--card-h);
+  border-radius: var(--radius);
+  position: relative;
+  flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.card--up {
+  background: #fffef7;
+  border: 1px solid #00000018;
+  cursor: pointer;
+}
+.card--down {
+  background:
+    repeating-linear-gradient(45deg, #7c4a22 0 6px, #6b4020 6px 12px);
+  border: 1px solid #3f2a15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.card--down .card-back {
+  font-size: calc(var(--card-w) * 0.4);
+  opacity: 0.5;
+}
+.card--gold {
+  color: var(--gold-deep);
+}
+.card--red {
+  color: var(--red);
+}
+.card-corner {
+  position: absolute;
+  font-size: calc(var(--card-w) * 0.3);
+  font-weight: 800;
+  line-height: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.card-corner i {
+  font-style: normal;
+  font-size: 0.85em;
+}
+.card-corner--tl {
+  top: 3px;
+  left: 4px;
+}
+.card-corner--br {
+  bottom: 3px;
+  right: 4px;
+  transform: rotate(180deg);
+}
+.card-pip {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(var(--card-w) * 0.62);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.15));
+}
+.card--up.is-selected {
+  transform: translateY(-6px);
+  box-shadow: 0 0 0 3px #16a34a, 0 6px 14px rgba(0, 0, 0, 0.4);
+  z-index: 5;
+}
+
+/* ── Controls ──────────────────────────────────────────────────── */
+.controls {
+  display: flex;
+  gap: 6px;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.btn {
+  flex: 1;
+  padding: 11px 4px;
+  border: none;
+  border-radius: 12px;
+  font-size: clamp(12px, 3.4vw, 15px);
+  font-weight: 700;
+  color: #14532d;
+  background: var(--panel);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  transition: transform 0.1s ease, filter 0.1s ease;
+}
+.btn:active {
+  transform: translateY(1px) scale(0.98);
+}
+.btn--primary {
+  color: #fff;
+  background: linear-gradient(180deg, #22c55e, #15803d);
+}
+
+/* ── Win overlay ───────────────────────────────────────────────── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 50;
+  animation: fade 0.3s ease;
+}
+.overlay-card {
+  background: #fffef7;
+  border-radius: 20px;
+  padding: 22px;
+  text-align: center;
+  width: 100%;
+  max-width: 320px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  animation: pop 0.35s ease;
+}
+.overlay-emoji {
+  font-size: 40px;
+}
+.overlay-card h2 {
+  margin: 6px 0 2px;
+  color: #15803d;
+}
+.overlay-card p {
+  margin: 0 0 14px;
+  color: #4b5563;
+  font-size: 14px;
+}
+.overlay-stats {
+  display: flex;
+  justify-content: space-around;
+  margin-bottom: 16px;
+}
+.overlay-stats div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: #6b7280;
+}
+.overlay-stats b {
+  font-size: 18px;
+  color: #14311c;
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(0.8);
+  }
+  60% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Short screens: compact the farm panel names */
+@media (max-height: 680px) {
+  .plot-name {
+    display: none;
+  }
+  .farm {
+    padding: 6px 8px;
+  }
+}
