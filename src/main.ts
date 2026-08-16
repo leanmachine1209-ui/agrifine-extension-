@@ -24,9 +24,14 @@ class Agritaire {
   private running = false;
   private clock: number | null = null;
 
+  private seed: number | undefined;
+
   constructor(root: HTMLElement) {
     this.root = root;
-    this.state = newGame();
+    // Optional ?seed=N gives a reproducible (shareable/daily) deal.
+    const raw = new URLSearchParams(location.search).get('seed');
+    this.seed = raw !== null && raw.trim() !== '' && Number.isFinite(Number(raw)) ? Number(raw) : undefined;
+    this.state = newGame(this.seed);
     this.startClock();
     this.running = true;
     this.bindEvents();
