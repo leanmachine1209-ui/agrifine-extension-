@@ -15,7 +15,7 @@ import {
 } from './game/rules';
 import { boardHTML, winOverlayHTML, formatClock, RenderModel } from './ui/render';
 
-class Agritaire {
+export class Agritaire {
   private root: HTMLElement;
   private state: GameState;
   private selectedId: string | null = null;
@@ -26,11 +26,13 @@ class Agritaire {
 
   private seed: number | undefined;
 
-  constructor(root: HTMLElement) {
+  constructor(root: HTMLElement, seedOverride?: number) {
     this.root = root;
-    // Optional ?seed=N gives a reproducible (shareable/daily) deal.
+    // Optional ?seed=N (or an explicit override) gives a reproducible deal.
     const raw = new URLSearchParams(location.search).get('seed');
-    this.seed = raw !== null && raw.trim() !== '' && Number.isFinite(Number(raw)) ? Number(raw) : undefined;
+    const fromUrl =
+      raw !== null && raw.trim() !== '' && Number.isFinite(Number(raw)) ? Number(raw) : undefined;
+    this.seed = seedOverride ?? fromUrl;
     this.state = newGame(this.seed);
     this.startClock();
     this.running = true;
