@@ -1,20 +1,35 @@
-"""Serve the Vite production build so a default Render Python service can host AGRITAIRE."""
+"""Serve the shipped Vite build so a live Render Python service actually loads the game."""
 
 from __future__ import annotations
 
-import mimetypes
 import os
-import subprocess
 import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from shutil import which
 from urllib.parse import unquote
 from wsgiref.simple_server import make_server
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
+PACKAGE_STATIC = Path(__file__).resolve().parent / "static"
 INDEX_NAME = "index.html"
+
+MIME_BY_SUFFIX = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".map": "application/json; charset=utf-8",
+}
 
 MISSING_DIST_HTML = """<!doctype html>
 <html lang="en">
@@ -25,68 +40,71 @@ MISSING_DIST_HTML = """<!doctype html>
   <body>
     <h1>AGRITAIRE production build is missing</h1>
     <p>
-      The Python service is running, but <code>dist/index.html</code> was not found
-      and <code>npm</code> is not available to build it.
+      The Python service is running, but no shipped <code>your_application/static</code>
+      or <code>dist/</code> build was found.
     </p>
-    <p>In the Render dashboard, set the build command to:</p>
+    <p>Run <code>npm run build</code> and redeploy, or set the Render build command to:</p>
     <pre>pip install -r requirements.txt &amp;&amp; npm ci --include=dev &amp;&amp; npm run build</pre>
-    <p>Or create a <strong>Static Site</strong> with publish directory <code>./dist</code>.</p>
   </body>
 </html>
 """.encode("utf-8")
 
 
-def make_app(dist: Path, root: Path | None = None, *, auto_build: bool = True):
-    """Return a WSGI app that serves ``dist`` (SPA fallback to index.html)."""
+def content_type_for(path: Path) -> str:
+    return MIME_BY_SUFFIX.get(path.suffix.lower(), "application/octet-stream")
 
-    root = root or dist.parent
-    built = False
 
-    def ensure_dist() -> None:
-        nonlocal built
-        if built or (dist / INDEX_NAME).is_file():
-            built = True
-            return
-        if not auto_build:
-            return
-        npm = _find_npm()
-        if npm is None:
-            return
-        env = os.environ.copy()
-        subprocess.check_call([npm, "ci", "--include=dev"], cwd=root, env=env)
-        subprocess.check_call([npm, "run", "build"], cwd=root, env=env)
-        built = True
+def pick_root(dist: Path, fallback: Path | None = None) -> Path:
+    """Prefer a fresh Vite dist, then the committed package static files."""
+    if (dist / INDEX_NAME).is_file():
+        return dist
+    if fallback is not None and (fallback / INDEX_NAME).is_file():
+        return fallback
+    return dist
+
+
+def make_app(
+    dist: Path,
+    root: Path | None = None,
+    *,
+    fallback: Path | None = None,
+    auto_build: bool = False,
+):
+    """Return a WSGI app that serves the game files (SPA fallback to index.html)."""
+
+    del root, auto_build  # kept for call-site compatibility; never build on request
 
     def application(
         environ: dict,
         start_response: Callable[[str, list[tuple[str, str]]], Callable[..., None]],
     ) -> Iterable[bytes]:
-        ensure_dist()
         method = environ.get("REQUEST_METHOD", "GET").upper()
         if method not in {"GET", "HEAD"}:
             start_response("405 Method Not Allowed", [("Allow", "GET, HEAD"), ("Content-Length", "0")])
             return [b""]
 
+        serve_root = pick_root(dist, fallback)
         url_path = unquote(environ.get("PATH_INFO", "/") or "/")
-        target = _safe_file(dist, url_path)
+        target = _safe_file(serve_root, url_path)
 
         if target is None:
-            if not (dist / INDEX_NAME).is_file():
+            if not (serve_root / INDEX_NAME).is_file():
                 start_response(
                     "503 Service Unavailable",
-                    [("Content-Type", "text/html; charset=utf-8"), ("Content-Length", str(len(MISSING_DIST_HTML)))],
+                    [
+                        ("Content-Type", "text/html; charset=utf-8"),
+                        ("Content-Length", str(len(MISSING_DIST_HTML))),
+                    ],
                 )
                 return [] if method == "HEAD" else [MISSING_DIST_HTML]
             start_response("404 Not Found", [("Content-Length", "0")])
             return [b""]
 
         payload = b"" if method == "HEAD" else target.read_bytes()
-        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-        if content_type.startswith("text/") or content_type in {"application/javascript", "application/json"}:
-            content_type = f"{content_type}; charset=utf-8"
         headers = [
-            ("Content-Type", content_type),
+            ("Content-Type", content_type_for(target)),
             ("Content-Length", str(target.stat().st_size)),
+            ("Cache-Control", "no-cache" if target.name == INDEX_NAME else "public, max-age=31536000"),
         ]
         start_response("200 OK", headers)
         if method == "HEAD":
@@ -94,15 +112,6 @@ def make_app(dist: Path, root: Path | None = None, *, auto_build: bool = True):
         return [payload]
 
     return application
-
-
-def _find_npm() -> str | None:
-    candidates = ["npm.cmd", "npm"] if os.name == "nt" else ["npm"]
-    for name in candidates:
-        found = which(name)
-        if found:
-            return found
-    return None
 
 
 def _safe_file(dist: Path, url_path: str) -> Path | None:
@@ -132,14 +141,15 @@ def _safe_file(dist: Path, url_path: str) -> Path | None:
     return None
 
 
-application = make_app(DIST, ROOT)
+application = make_app(DIST, ROOT, fallback=PACKAGE_STATIC)
 app = application
 
 
 def main() -> None:
     port = int(os.environ.get("PORT", "10000"))
     host = os.environ.get("HOST", "0.0.0.0")
-    print(f"Serving AGRITAIRE from {DIST} on {host}:{port}", file=sys.stderr)
+    serve = pick_root(DIST, PACKAGE_STATIC)
+    print(f"Serving AGRITAIRE from {serve} on {host}:{port}", file=sys.stderr)
     with make_server(host, port, application) as httpd:
         httpd.serve_forever()
 

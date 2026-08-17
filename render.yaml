@@ -11,7 +11,7 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt && npm ci --include=dev && npm run build
-    startCommand: gunicorn your_application.wsgi --bind 0.0.0.0:$PORT
+    startCommand: bash start.sh
     healthCheckPath: /
     previews:
       generation: automatic
