@@ -1,17 +1,18 @@
-// Pure HTML builders for AGRITAIRE (v4): seasons, mini-decks & selling.
+// Pure HTML builders for AGRITAIRE (v5): Grain Bank + living Pasture, seasons.
 
 import { Card, SUIT_INFO, rankLabel } from '../game/cards';
 import {
   GameState,
   Row,
-  capacity,
   effectiveTop,
   canPlace,
   canFold,
   canDrawMiniDeck,
   anyValidPlacement,
+  feedCost,
   sellValue,
   MINI_DECK_COST,
+  CATTLE_CASHOUT,
 } from '../game/rules';
 
 export interface RenderModel {
@@ -48,7 +49,7 @@ function rowHTML(state: GameState, index: number, sel: Card | null): string {
   const controls = canFold(row)
     ? `<div class="row-fold">
          <button class="mini mini--grain" data-action="fold-grain" data-row="${index}" title="Harvest to grain bank">🌾 Harvest</button>
-         <button class="mini mini--cattle" data-action="fold-cattle" data-row="${index}" title="Bank as cattle">🐄 Cattle</button>
+         <button class="mini mini--cattle" data-action="fold-cattle" data-row="${index}" title="Raise as livestock">🐄 Cattle</button>
        </div>`
     : `<div class="row-fold">${rowHintHTML(row)}</div>`;
   return `
@@ -58,11 +59,25 @@ function rowHTML(state: GameState, index: number, sel: Card | null): string {
     </div>`;
 }
 
+function pastureHTML(state: GameState): string {
+  if (state.herd.length === 0) {
+    return '<div class="pasture-empty">no livestock yet — fold a run as 🐄</div>';
+  }
+  return state.herd
+    .slice()
+    .sort((a, b) => a.life - b.life)
+    .map(
+      (cow) =>
+        `<span class="cow" title="cashes out in ${cow.life} season(s)">🐄<i>${cow.life}</i></span>`,
+    )
+    .join('');
+}
+
 export function boardHTML(model: RenderModel): string {
   const s = model.state;
-  const cap = capacity(s);
   const sel = selectedCard(s, model.selectedId);
   const handEmpty = s.hand.length === 0;
+  const feed = feedCost(s);
 
   const handCards = handEmpty
     ? '<div class="card card--empty"></div>'
@@ -92,10 +107,19 @@ export function boardHTML(model: RenderModel): string {
       <div class="hud">
         <div class="stat"><span>🏆</span><b>${s.score}</b></div>
         <div class="stat stat--seed"><span>🌱</span><b>${s.seeds}</b></div>
-        <div class="stat"><span>🌾</span><b>${s.grain}</b></div>
-        <div class="stat"><span>🐄</span><b>${s.herd}/${cap}</b></div>
       </div>
     </header>
+
+    <section class="bank">
+      <div class="bank-box">
+        <div class="bank-label">🌾 Grain Bank</div>
+        <div class="bank-value">${s.grain}<small>${feed > 0 ? ` · −${feed}/season` : ''}</small></div>
+      </div>
+      <div class="bank-box bank-box--herd">
+        <div class="bank-label">🐄 Pasture <span class="cashout-note">(+${CATTLE_CASHOUT} at cash-out)</span></div>
+        <div class="pasture">${pastureHTML(s)}</div>
+      </div>
+    </section>
 
     <section class="hand-panel">
       <div class="hand-cards" data-hand>${handCards}</div>
@@ -131,7 +155,7 @@ export function overOverlayHTML(state: GameState): string {
       <p>${sub}</p>
       <div class="overlay-stats">
         <div><span>🏆 Score</span><b>${state.score}</b></div>
-        <div><span>🐄 Herd</span><b>${state.herd}</b></div>
+        <div><span>🐄 Cashed</span><b>${state.cattleCashed}</b></div>
         <div><span>🌾 Grain</span><b>${state.grain}</b></div>
       </div>
       <button class="btn btn--primary" data-action="new" type="button">Start a New Farm</button>

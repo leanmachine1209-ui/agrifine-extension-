@@ -1,34 +1,38 @@
-// AGRITAIRE rules engine (v4) — seasons, mini-decks & operating loans.
+// AGRITAIRE rules engine (v5) — seasons, mini-deck loans & a LIVING HERD.
 //
-// Cards arrive in MINI-DECKS (a season's hand). The first mini-deck is free;
-// each later one is an OPERATING LOAN paid in 🌱 SEEDS. You either PLACE a card
-// on a row (build ascending runs → fold for points) or SELL it for seeds.
+// Cards arrive in MINI-DECKS (a season's hand). The first is free; each later
+// one is an OPERATING LOAN paid in 🌱 SEEDS. Each turn you PLACE a card on a row
+// (ascending runs) or SELL it for seeds.
 //
-// When your hand empties:
-//   • deck also empty  → the run is over, you're done (season complete).
-//   • can't afford the next mini-deck → BANKRUPT (sell earlier next time!).
-// Otherwise take the loan to draw the next mini-deck.
+// Folding a run (>=3):
+//   🌾 Harvest → grain bank (+ seeds). Grain is the Grain Bank: it FEEDS cattle.
+//   🐄 Cattle  → adds live animals to your herd.
 //
-// Rows build strictly ascending consecutive runs (rank +1); ⭐ wild fills any
-// slot. A run of >=3 folds as 🌾 Harvest (grain bank, +seeds) or 🐄 Cattle
-// (points ×2, capped by preservation capacity). Grain raises cattle capacity.
+// The HERD is alive: every new season each animal EATS grain (FEED_PER_CATTLE).
+// Unfed animals STARVE (lost). Animals AGE, and when their lifespan ends they
+// leave the board and CASH OUT for big points. Survivors are sold at game end.
+//
+// End states: deck empty → season complete; hand empty & can't afford the next
+// loan → bankrupt.
 
 import { Card, Suit, createDeck, shuffle, mulberry32, isWild } from './cards';
 
 export const ROW_COUNT = 4;
 export const MIN_RUN = 3;
-export const BASE_HERD = 2;
-export const GRAIN_PER_CATTLE = 2;
-export const CATTLE_POINTS = 2;
-export const HERD_END_BONUS = 3;
+
+// Living herd.
+export const CATTLE_LIFESPAN = 3; // seasons an animal stays before cashing out
+export const FEED_PER_CATTLE = 1; // grain eaten per animal per season
+export const CATTLE_CASHOUT = 8; // big points when an animal ages out
+export const HERD_END_BONUS = 4; // points per surviving animal at game end
 
 // Seasons & the seed economy.
-export const MINI_DECK_SIZE = 5; // cards drawn per season
-export const SEEDS_START = 5; // starting operating capital
-export const MINI_DECK_COST = 2; // seed loan to draw the next mini-deck
-export const SELL_VALUE = 1; // seeds gained selling a ranked card
-export const WILD_SELL_VALUE = 2; // wilds are worth more when sold
-export const HARVEST_SEED_YIELD = 2; // grain harvest also returns seeds
+export const MINI_DECK_SIZE = 5;
+export const SEEDS_START = 5;
+export const MINI_DECK_COST = 2;
+export const SELL_VALUE = 1;
+export const WILD_SELL_VALUE = 2;
+export const HARVEST_SEED_YIELD = 2;
 
 export type FoldMode = 'grain' | 'cattle';
 
@@ -37,19 +41,26 @@ export interface Row {
   base: number;
 }
 
+export interface Cattle {
+  id: string;
+  life: number; // seasons of life remaining
+}
+
 export interface GameState {
   deck: Card[];
   hand: Card[];
   seeds: number;
   rows: Row[];
-  grain: number;
-  herd: number;
+  grain: number; // the Grain Bank — feeds the herd
+  herd: Cattle[];
   score: number;
   season: number;
   sold: number;
-  cattleLost: number;
+  cattleCashed: number;
+  cattleStarved: number;
+  nextCow: number;
   over: boolean;
-  failed: boolean; // ended by bankruptcy rather than finishing the deck
+  failed: boolean;
 }
 
 function emptyRows(): Row[] {
@@ -70,15 +81,17 @@ export function newGame(seed?: number): GameState {
     seeds: SEEDS_START,
     rows: emptyRows(),
     grain: 0,
-    herd: 0,
+    herd: [],
     score: 0,
     season: 1,
     sold: 0,
-    cattleLost: 0,
+    cattleCashed: 0,
+    cattleStarved: 0,
+    nextCow: 0,
     over: false,
     failed: false,
   };
-  drawInto(state, MINI_DECK_SIZE); // first mini-deck is free
+  drawInto(state, MINI_DECK_SIZE);
   return state;
 }
 
@@ -86,11 +99,7 @@ export function cloneState(state: GameState): GameState {
   return structuredClone(state);
 }
 
-// ── Capacity & placement ────────────────────────────────────────────────────
-
-export function capacity(state: GameState): number {
-  return BASE_HERD + Math.floor(state.grain / GRAIN_PER_CATTLE);
-}
+// ── Placement ─────────────────────────────────────────────────────────────
 
 export function effectiveTop(row: Row): number | null {
   return row.cards.length === 0 ? null : row.base + row.cards.length - 1;
@@ -104,6 +113,11 @@ export function canPlace(card: Card, row: Row): boolean {
 
 export function anyValidPlacement(state: GameState): boolean {
   return state.hand.some((card) => state.rows.some((r) => canPlace(card, r)));
+}
+
+/** Grain the herd will eat next season. */
+export function feedCost(state: GameState): number {
+  return state.herd.length * FEED_PER_CATTLE;
 }
 
 // ── Season / mini-deck economy ────────────────────────────────────────────────
@@ -121,11 +135,42 @@ export function canDrawMiniDeck(state: GameState): boolean {
   );
 }
 
-/** Take the operating loan and draw the next mini-deck. */
+/** Feed, age, cash out, and starve the herd as a new season begins. */
+export function advanceHerd(state: GameState): void {
+  if (state.herd.length === 0) return;
+
+  // Feed from the Grain Bank; unfed animals starve.
+  const need = feedCost(state);
+  if (state.grain >= need) {
+    state.grain -= need;
+  } else {
+    const fed = Math.floor(state.grain / FEED_PER_CATTLE);
+    state.grain -= fed * FEED_PER_CATTLE;
+    state.herd.sort((a, b) => a.life - b.life); // keep animals closest to cashing out
+    state.cattleStarved += state.herd.length - fed;
+    state.herd = state.herd.slice(0, fed);
+  }
+
+  // Age survivors; those that reach the end of life cash out for big points.
+  const survivors: Cattle[] = [];
+  for (const cow of state.herd) {
+    cow.life -= 1;
+    if (cow.life <= 0) {
+      state.score += CATTLE_CASHOUT;
+      state.cattleCashed++;
+    } else {
+      survivors.push(cow);
+    }
+  }
+  state.herd = survivors;
+}
+
+/** Take the operating loan, advance the season (herd feeds/ages), and draw. */
 export function drawMiniDeck(state: GameState): boolean {
   if (!canDrawMiniDeck(state)) return false;
   state.seeds -= MINI_DECK_COST;
   state.season++;
+  advanceHerd(state);
   drawInto(state, MINI_DECK_SIZE);
   return true;
 }
@@ -134,18 +179,16 @@ function finish(state: GameState, failed: boolean): void {
   if (state.over) return;
   state.over = true;
   state.failed = failed;
-  if (!failed) state.score += state.herd * HERD_END_BONUS;
+  if (!failed) state.score += state.herd.length * HERD_END_BONUS; // sell survivors
 }
 
-/** After the hand changes, settle end-of-season outcomes. */
 function settleHand(state: GameState): void {
   if (state.over || state.hand.length > 0) return;
   if (state.deck.length === 0) {
-    finish(state, false); // worked the whole deck
+    finish(state, false);
   } else if (state.seeds < MINI_DECK_COST) {
-    finish(state, true); // can't fund the next season
+    finish(state, true);
   }
-  // else: wait for the player to take the loan (drawMiniDeck).
 }
 
 function handIndex(state: GameState, cardId: string): number {
@@ -167,7 +210,6 @@ export function placeFromHand(state: GameState, cardId: string, rowIndex: number
   return true;
 }
 
-/** Sell a held card for seeds — funds the next operating loan. */
 export function sellCard(state: GameState, cardId: string): boolean {
   if (state.over) return false;
   const idx = handIndex(state, cardId);
@@ -200,16 +242,14 @@ export function foldRow(state: GameState, rowIndex: number, mode: FoldMode): boo
   if (mode === 'grain') {
     const grainBonus = countSuit(row.cards, 'grain');
     state.grain += len + grainBonus;
-    state.seeds += HARVEST_SEED_YIELD; // sell grain for operating capital
+    state.seeds += HARVEST_SEED_YIELD;
     state.score += len + fieldBonus;
   } else {
-    const liveBonus = countSuit(row.cards, 'livestock');
-    const want = len + liveBonus;
-    const room = Math.max(0, capacity(state) - state.herd);
-    const added = Math.min(want, room);
-    state.herd += added;
-    state.cattleLost += want - added;
-    state.score += added * CATTLE_POINTS + fieldBonus;
+    const count = len + countSuit(row.cards, 'livestock');
+    for (let i = 0; i < count; i++) {
+      state.herd.push({ id: `cow-${state.nextCow++}`, life: CATTLE_LIFESPAN });
+    }
+    state.score += fieldBonus; // real payoff comes when they cash out
   }
 
   row.cards = [];

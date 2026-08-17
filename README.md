@@ -34,14 +34,22 @@ A **turn-based**, sequential stacking game. Four suits:
 
 ### Folding a set
 
-A row of **3+ cards** can be folded for points:
+A row of **3+ cards** can be folded:
 
-- 🌾 **Harvest** → banks **grain**. Grain raises how many **cattle** you can keep.
-- 🐄 **Cattle** → banks **cattle** (worth 2× points), but only up to your capacity
-  (`base + grain / 2`). Cattle over capacity can't be preserved.
+- 🌾 **Harvest** → fills the **Grain Bank** (and returns some seeds).
+- 🐄 **Cattle** → adds live animals to your **Pasture**.
 
-**Suit bonuses on fold:** grain cards boost harvests, livestock cards boost the herd,
-field cards add bonus points. Surviving cattle pay a bonus when the deck runs out.
+### The living herd
+
+The Pasture is alive. Every new season each animal **eats grain** from the Grain Bank
+(`1 grain each`). If you can't feed them, animals **starve** (the ones furthest from
+payoff go first). Animals **age**, and when their lifespan (3 seasons) ends they leave
+the board and **cash out for big points** (+8). Any survivors are sold for a bonus when
+the deck runs out. So grain is your feed reserve — harvest enough to keep the herd alive
+until it pays off.
+
+**Suit bonuses on fold:** grain cards boost harvests, livestock cards add more animals,
+field cards add bonus points.
 
 ### Controls (touch + mouse)
 

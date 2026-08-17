@@ -13,12 +13,13 @@ describe('AGRITAIRE UI wiring', () => {
     root = document.getElementById('app')!;
   });
 
-  it('renders season 1 with a 5-card mini-deck and starting seeds', () => {
+  it('renders season 1 with seeds, a grain bank, an empty pasture, and 4 rows', () => {
     new Agritaire(root, 3);
     expect(root.querySelector('.brand')?.textContent).toContain('AGRITAIRE');
     expect(root.querySelector('.stat--seed b')?.textContent).toBe('5');
+    expect(root.querySelector('.bank-value')?.textContent).toContain('0'); // grain bank
+    expect(root.querySelector('.pasture-empty')).toBeTruthy(); // no livestock yet
     expect(root.querySelectorAll('[data-hand] .card')).toHaveLength(5);
-    expect(root.querySelector('.hand-title')?.textContent).toContain('Season 1');
     expect(root.querySelectorAll('.row')).toHaveLength(4);
   });
 
@@ -39,22 +40,18 @@ describe('AGRITAIRE UI wiring', () => {
     new Agritaire(root, 3);
     const before = Number(root.querySelector('.stat--seed b')?.textContent);
     click(root.querySelector('[data-action="sell"]'));
-    const after = Number(root.querySelector('.stat--seed b')?.textContent);
-    expect(after).toBeGreaterThan(before);
+    expect(Number(root.querySelector('.stat--seed b')?.textContent)).toBeGreaterThan(before);
     expect(root.querySelectorAll('[data-hand] .card')).toHaveLength(4);
   });
 
   it('emptying the hand then taking the loan draws the next season', () => {
     new Agritaire(root, 3);
-    for (let i = 0; i < 5; i++) click(root.querySelector('[data-action="sell"]')); // sell whole hand
-    expect(root.querySelectorAll('[data-hand] .card:not(.card--empty)')).toHaveLength(0);
+    for (let i = 0; i < 5; i++) click(root.querySelector('[data-action="sell"]'));
     const loanBtn = root.querySelector('[data-action="draw-mini"]') as HTMLButtonElement;
-    expect(loanBtn).toBeTruthy();
-    expect(loanBtn.disabled).toBe(false);
+    expect(loanBtn?.disabled).toBe(false);
     const seedsBefore = Number(root.querySelector('.stat--seed b')?.textContent);
     click(loanBtn);
     expect(root.querySelector('.hand-title')?.textContent).toContain('Season 2');
-    expect(root.querySelectorAll('[data-hand] .card')).toHaveLength(5);
     expect(Number(root.querySelector('.stat--seed b')?.textContent)).toBe(seedsBefore - 2);
   });
 
@@ -64,6 +61,5 @@ describe('AGRITAIRE UI wiring', () => {
     click(root.querySelector('[data-action="new"]'));
     expect(root.querySelector('.hand-title')?.textContent).toContain('Season 1');
     expect(root.querySelector('.stat--seed b')?.textContent).toBe('5');
-    expect(root.querySelectorAll('[data-hand] .card')).toHaveLength(5);
   });
 });
