@@ -92,16 +92,23 @@ npm run build    # type-check + production build to dist/
 npm run preview  # serve the production build
 ```
 
-## Deploy (Render)
+## Deploy (Render, free)
 
-`render.yaml` defines a static-site blueprint. On Render, create a new **Blueprint**
-from this repo (or a **Static Site** manually) with:
+`render.yaml` is a **free** static-site blueprint. Vite and TypeScript live in
+`devDependencies`, so the build must install them even when Render sets
+`NODE_ENV=production`:
 
-- **Build command:** `npm ci && npm run build`
-- **Publish directory:** `dist`
+- **Plan:** Free
+- **Build command:** `npm ci --include=dev && npm run build`
+- **Publish directory:** `./dist`
+- **Node:** 20
 
-Render builds the Vite bundle and serves `dist/`, so the deployed URL plays the same
-game as `npm run dev`. `?seed=N` works on the hosted URL too.
+Until this branch is on `main`, point the Render service at
+`cursor/agritaire-vertical-stacks-63ef` (or merge PR #3). Building `main` still
+compiles the old Chrome extension and will fail as a playable site.
+
+`?seed=N` works on the hosted URL. There is no login or paywall — the game is
+free to play at the `onrender.com` URL.
 
 ## Project layout
 

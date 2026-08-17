@@ -4,13 +4,18 @@
   "description": "AGRITAIRE — a farming-simulator twist on solitaire. Mobile-first web game.",
   "type": "module",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "start": "vite preview --host 0.0.0.0 --port 4173",
     "test": "vitest run",
     "test:watch": "vitest"
   },
+
   "devDependencies": {
     "jsdom": "^29.1.1",
     "typescript": "^5.5.4",
