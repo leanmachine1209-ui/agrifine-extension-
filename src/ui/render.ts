@@ -1,4 +1,17 @@
-import { Card, SUIT_INFO, SUITS, Suit, RANK_MAX, cardLabel, rankLabel, isFieldCard } from '../game/cards';
+import {
+  Card,
+  SUIT_INFO,
+  SUITS,
+  RANK_MAX,
+  EVENT_INFO,
+  EVENT_COUNT,
+  cardLabel,
+  rankLabel,
+  isFieldCard,
+  isEvent,
+  isRanked,
+  isBoost,
+} from '../game/cards';
 import {
   GameState,
   PileRef,
@@ -9,10 +22,11 @@ import {
   ownedFarms,
   leasedFields,
   canRecallFromLease,
-  hasYard,
   hasCrew,
   advise,
   isWon,
+  ownedCropFarms,
+  ownedHerdFarms,
 } from '../game/rules';
 
 export interface RenderModel {
@@ -27,14 +41,33 @@ function pileAttr(ref: PileRef): string {
 }
 
 function cardHTML(card: Card, opts: { selected?: boolean; action?: string; buried?: boolean }): string {
-  const info = SUIT_INFO[card.suit];
   if (!card.faceUp) {
     return `<div class="card card--back" aria-hidden="true"></div>`;
   }
   const selected = opts.selected ? ' is-selected' : '';
-  const fieldCls = isFieldCard(card) ? ' card--plot' : '';
-  const action = opts.action ?? 'select';
   const buried = opts.buried ? ' card--buried' : '';
+  const action = opts.action ?? (isEvent(card) ? 'resolve' : 'select');
+
+  if (isEvent(card)) {
+    const info = EVENT_INFO[card.event];
+    const polar = isBoost(card) ? 'boost' : 'hinder';
+    if (action === 'noop') {
+      return `
+      <div class="card card--event card--${polar}${buried}" aria-label="${cardLabel(card)}">
+        <span class="card-suit">${info.emoji}</span>
+        <span class="card-rank">${info.label}</span>
+      </div>`;
+    }
+    return `
+    <button type="button" class="card card--event card--${polar}${selected}${buried}"
+      data-action="${action}" data-id="${card.id}" aria-label="${cardLabel(card)}">
+      <span class="card-suit">${info.emoji}</span>
+      <span class="card-rank">${info.label}</span>
+    </button>`;
+  }
+
+  const info = SUIT_INFO[card.suit];
+  const fieldCls = isFieldCard(card) ? ' card--plot' : '';
   if (action === 'noop') {
     return `
     <div class="card card--${info.color}${fieldCls}${buried}" aria-label="${cardLabel(card)}">
@@ -50,7 +83,7 @@ function cardHTML(card: Card, opts: { selected?: boolean; action?: string; burie
     </button>`;
 }
 
-function fieldHTML(state: GameState, suit: Suit, valid: Set<string>, selectedId: string | null): string {
+function fieldHTML(state: GameState, suit: (typeof SUITS)[number], valid: Set<string>, selectedId: string | null): string {
   const pile = state.fields[suit];
   const info = SUIT_INFO[suit];
   const top = topOf(pile);
@@ -59,11 +92,19 @@ function fieldHTML(state: GameState, suit: Suit, valid: Set<string>, selectedId:
   const validCls = valid.has(key) ? ' is-valid' : '';
   const tenureCls = ` is-${tenure}`;
   const recall = tenure === 'leased' && canRecallFromLease(state);
+  const pick =
+    info.family === 'herd'
+      ? `Pick ${info.label.toLowerCase()} · ${info.land}`
+      : `Pick ${info.label.toLowerCase()} crops`;
   const label =
-    tenure === 'owned' ? 'Owned farm' : tenure === 'leased' ? `Leased ${pile.length}/${RANK_MAX}` : 'Vacant · lease with F';
-  const body = top
+    tenure === 'owned'
+      ? 'Owned farm'
+      : tenure === 'leased'
+        ? `Leased ${pile.length}/${RANK_MAX}`
+        : pick;
+  const body = top && isRanked(top)
     ? cardHTML(top, { action: recall ? 'select' : 'noop', selected: top.id === selectedId })
-    : `<div class="slot-empty">${info.emoji}<small>Lease</small></div>`;
+    : `<div class="slot-empty">${info.emoji}<small>${tenure === 'vacant' ? 'Plot' : 'Lease'}</small></div>`;
   return `
     <article class="field-slot field-slot--${info.color}${validCls}${tenureCls}" ${pileAttr({ type: 'field', suit })} data-action="drop">
       <header class="slot-head">${info.emoji} ${info.label} <b>${label}</b></header>
@@ -82,6 +123,7 @@ function holdHTML(state: GameState, index: number, selectedId: string | null, va
           cardHTML(card, {
             selected: card.id === selectedId,
             buried: i < pile.length - 1,
+            action: i < pile.length - 1 && !card.faceUp ? 'select' : undefined,
           }),
         )
         .join('')
@@ -90,6 +132,27 @@ function holdHTML(state: GameState, index: number, selectedId: string | null, va
     <article class="hold-col${validCls}${emptyCls}" ${pileAttr({ type: 'hold', index })} data-action="drop">
       <div class="hold-stack">${cards}</div>
     </article>`;
+}
+
+function cycleCopy(state: GameState): string {
+  const owned = ownedFarms(state);
+  const crops = ownedCropFarms(state);
+  const herd = ownedHerdFarms(state);
+  if (owned === 0) {
+    return 'Play <b>F</b> to pick a plot: annual, perennial, beef pasture, or dairy barn.';
+  }
+  if (state.droughtMoves > 0) {
+    return `Drought: fields closed for <b>${state.droughtMoves}</b> move${state.droughtMoves === 1 ? '' : 's'}.`;
+  }
+  if (owned >= 4) {
+    return `Deeds are done. Resolve the remaining events (${state.resolved.length}/${EVENT_COUNT}).`;
+  }
+  const bits: string[] = [];
+  if (owned >= 1) bits.push('Recall from a lease');
+  if (herd >= 1) bits.push('herd manure is richer');
+  if (crops >= 1) bits.push('crops feed herd F & 2s');
+  if (owned >= 3) bits.push('crew plays F & 2s');
+  return bits.join(' · ') + '.';
 }
 
 export function boardHTML(model: RenderModel): string {
@@ -117,6 +180,8 @@ export function boardHTML(model: RenderModel): string {
       : 'That card has nowhere to go — pick another, or draw.'
     : tip.text;
 
+  const fertilizeDisabled = s.manure < 1 ? ' disabled' : '';
+
   return `
   <div class="game">
     <header class="topbar">
@@ -125,10 +190,11 @@ export function boardHTML(model: RenderModel): string {
         <div class="stat"><span>🏆</span><b>${s.score}</b></div>
         <div class="stat"><span>🃏</span><b>${s.moves}</b></div>
         <div class="stat"><span>🏡</span><b>${owned}/4</b></div>
+        <div class="stat"><span>💩</span><b>${s.manure}</b></div>
       </div>
     </header>
 
-    <section class="stock-row" aria-label="Stock and waste">
+    <section class="stock-row" aria-label="Stock, waste, and manure cycle">
       <div class="stock-box">
         <div class="bank-label">Stock · ${s.stock.length}</div>
         ${stockFace}
@@ -138,19 +204,9 @@ export function boardHTML(model: RenderModel): string {
         ${wasteFace}
       </div>
       <div class="stock-box stock-box--progress">
-        <div class="bank-label">Farms owned · ${leased} leased</div>
+        <div class="bank-label">Cycle · ${leased} leased · events ${s.resolved.length}/${EVENT_COUNT}</div>
         <div class="bank-value">${owned}/4</div>
-        <p class="season-copy">
-          ${owned === 0
-            ? 'Lease with <b>F</b>. Finish the 14-card suit to own the farm.'
-            : owned === 1
-              ? 'Deed #1: recall a card from a lease when you need a builder.'
-              : owned === 2
-                ? 'Deed #2: extra yard unlocked. Keep flipping buried cards.'
-                : owned === 3
-                  ? 'Deed #3: the crew plays F and 2s for you.'
-                  : 'All four farms are yours.'}
-        </p>
+        <p class="season-copy">${cycleCopy(s)}</p>
       </div>
     </section>
 
@@ -170,10 +226,11 @@ export function boardHTML(model: RenderModel): string {
     <footer class="controls">
       <div class="legend-row">
         ${SUITS.map((suit) => `<span class="legend"><i>${SUIT_INFO[suit].emoji}</i>${SUIT_INFO[suit].label}</span>`).join('')}
-        <span class="legend">F leases · ★ Harvest · ${hasYard(s) ? 'Yard open' : '7 holds'}${hasCrew(s) ? ' · Crew on' : ''}</span>
+        <span class="legend">Crops overlay herd · 7 holds${hasCrew(s) ? ' · Crew on' : ''}${s.rainSafe ? ' · Rain' : ''}</span>
       </div>
       <div class="hand-actions">
         <button class="btn" data-action="auto" type="button">🌾 Play F &amp; 2s</button>
+        <button class="btn" data-action="fertilize" type="button"${fertilizeDisabled}>💩 Fertilize</button>
         <button class="btn btn--primary" data-action="new" type="button">🌱 New Farm</button>
       </div>
     </footer>
@@ -186,8 +243,8 @@ export function overOverlayHTML(state: GameState): string {
   <div class="overlay" data-overlay>
     <div class="overlay-card">
       <div class="overlay-emoji">🌾🐄🏆</div>
-      <h2>You own all four farms!</h2>
-      <p>Every leased field is now a deed — the late-game county is yours.</p>
+      <h2>The farm cycles</h2>
+      <p>All four plots are deeds, the 14 events are home, and manure has returned to the fields.</p>
       <div class="overlay-stats">
         <div><span>🏆 Score</span><b>${state.score}</b></div>
         <div><span>🃏 Moves</span><b>${state.moves}</b></div>

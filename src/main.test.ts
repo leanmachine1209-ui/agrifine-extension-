@@ -20,6 +20,13 @@ const FIELD_ON_WASTE = findSeed((s) => {
   return Boolean(first && isFieldCard(first));
 });
 
+const RANKED_HOLD_FACE = findSeed((s) =>
+  s.holding.some((pile) => {
+    const top = pile[pile.length - 1];
+    return Boolean(top?.faceUp && top.kind === 'ranked');
+  }),
+);
+
 describe('AGRITAIRE solitaire UI', () => {
   let root: HTMLElement;
   beforeEach(() => {
@@ -34,11 +41,11 @@ describe('AGRITAIRE solitaire UI', () => {
     expect(root.querySelectorAll('.hold-col')).toHaveLength(7);
     expect(root.querySelectorAll('.hold-col .card, .hold-col .card--back').length).toBeGreaterThan(7);
     expect(root.querySelector('[data-action="draw"]')).toBeTruthy();
-    expect(root.textContent).toMatch(/Lease|holding|Field/);
+    expect(root.textContent).toMatch(/Plot|holding|Field|Pasture|Barn/);
   });
 
   it('selecting a face-up holding card highlights it', () => {
-    new Agritaire(root, 3);
+    new Agritaire(root, RANKED_HOLD_FACE);
     const face = root.querySelector('.hold-col .card[data-action="select"]');
     expect(face).toBeTruthy();
     click(face);
@@ -57,7 +64,7 @@ describe('AGRITAIRE solitaire UI', () => {
     expect(suit).toBeTruthy();
     click(suit);
     expect(root.querySelector('.field-slot .card--plot')).toBeTruthy();
-    expect(root.textContent).toMatch(/Leased 1\/14/);
+    expect(root.textContent).toMatch(/Leased 1\/13/);
   });
 
   it('New Farm restores empty fields and a fresh holding set', () => {

@@ -6,10 +6,10 @@
   --overlap: calc(var(--card-h) * 0.38);
   --radius: 8px;
 
-  --livestock: #b45309;
-  --grain: #ca8a04;
-  --orchard: #b91c1c;
-  --equipment: #0369a1;
+  --pasture: #b45309;
+  --annual: #ca8a04;
+  --perennial: #b91c1c;
+  --barn: #0369a1;
   --field: #16a34a;
   --panel: rgba(255, 255, 255, 0.94);
 }
@@ -253,21 +253,39 @@ body {
   font-size: calc(var(--card-w) * 0.46);
   line-height: 1;
 }
-.card--grain {
-  color: var(--grain);
-  border-bottom-color: var(--grain);
+.card--annual {
+  color: var(--annual);
+  border-bottom-color: var(--annual);
 }
-.card--orchard {
-  color: var(--orchard);
-  border-bottom-color: var(--orchard);
+.card--perennial {
+  color: var(--perennial);
+  border-bottom-color: var(--perennial);
 }
-.card--livestock {
-  color: var(--livestock);
-  border-bottom-color: var(--livestock);
+.card--pasture {
+  color: var(--pasture);
+  border-bottom-color: var(--pasture);
 }
-.card--equipment {
-  color: var(--equipment);
-  border-bottom-color: var(--equipment);
+.card--barn {
+  color: var(--barn);
+  border-bottom-color: var(--barn);
+}
+.card--event {
+  background: #fefce8;
+  border-style: dashed;
+  min-width: var(--card-w);
+}
+.card--event .card-rank {
+  font-size: calc(var(--card-w) * 0.18);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.card--boost {
+  color: #166534;
+  border-bottom-color: #16a34a;
+}
+.card--hinder {
+  color: #9a3412;
+  border-bottom-color: #c2410c;
 }
 .card--plot {
   box-shadow: 0 0 0 2px #16a34a inset;
@@ -354,6 +372,11 @@ body {
 }
 .btn:active {
   transform: translateY(1px) scale(0.99);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
 }
 .btn--primary {
   color: #fff;

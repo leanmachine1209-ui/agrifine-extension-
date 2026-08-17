@@ -9,6 +9,8 @@ import {
   sendToField,
   autoPlayFields,
   developAfterMove,
+  resolveEvent,
+  fertilize,
   isWon,
 } from './game/rules';
 import { boardHTML, overOverlayHTML, RenderModel } from './ui/render';
@@ -48,6 +50,7 @@ export class Agritaire {
       const target = e.target as HTMLElement;
       const el = target.closest<HTMLElement>('[data-action]');
       if (!el) return;
+      if (el instanceof HTMLButtonElement && el.disabled) return;
 
       const action = el.dataset.action!;
       const id = el.dataset.id;
@@ -78,6 +81,14 @@ export class Agritaire {
         case 'draw':
           drawFromStock(this.state);
           developAfterMove(this.state);
+          this.selectedId = null;
+          break;
+        case 'resolve':
+          if (id && resolveEvent(this.state, id)) developAfterMove(this.state);
+          this.selectedId = null;
+          break;
+        case 'fertilize':
+          if (fertilize(this.state)) developAfterMove(this.state);
           this.selectedId = null;
           break;
         case 'auto':
