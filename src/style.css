@@ -93,12 +93,42 @@ body {
   padding: 10px 12px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
-.hand-slot {
+.hand-cards {
   flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  min-width: calc(var(--card-w) * 1.3);
+}
+.hand-cards .card {
+  width: calc(var(--card-w) * 1.25);
+  height: calc(var(--card-h) * 1.25);
 }
 .hand-info {
   flex: 1;
   min-width: 0;
+}
+.hand-actions {
+  display: flex;
+  gap: 6px;
+}
+.hand-actions .btn {
+  flex: 1;
+  padding: 8px 6px;
+  font-size: 12px;
+}
+.btn--seed {
+  color: #fff;
+  background: linear-gradient(180deg, #34d399, #059669);
+}
+.btn--seed:disabled {
+  opacity: 0.5;
+  filter: grayscale(0.4);
+  cursor: not-allowed;
+}
+.btn--discard:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .hand-title {
   font-size: 12px;
@@ -246,6 +276,14 @@ body {
   background: rgba(0, 0, 0, 0.1);
   border-style: dashed;
   box-shadow: none;
+}
+
+.hand-cards .card {
+  cursor: pointer;
+}
+.card.is-selected {
+  transform: translateY(-6px);
+  box-shadow: 0 0 0 3px #16a34a, 0 6px 14px rgba(0, 0, 0, 0.4);
 }
 
 /* ── Controls / legend ───────────────────────────────── */
