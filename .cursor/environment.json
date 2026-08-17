@@ -1,10 +1,19 @@
 {
+<<<<<<< HEAD
   "name": "AGRITAIRE",
   "install": "npm ci",
   "terminals": [
     {
       "name": "vite dev",
       "command": "npm run dev -- --host 0.0.0.0 --port 5173"
+=======
+  "name": "Agrifine extension",
+  "install": "npm ci && npm run build",
+  "terminals": [
+    {
+      "name": "webpack watch",
+      "command": "npm run watch"
+>>>>>>> origin/main
     }
   ]
 }
