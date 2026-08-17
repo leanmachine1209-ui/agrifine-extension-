@@ -1,86 +1,93 @@
 # 🌱 AGRITAIRE
 
-A farming-simulator twist on **solitaire**. Stack vertically aligned suits,
-collapse them into bigger barns and tractors, and keep crops or cattle paying
-the bills. Mobile-first web game built with **Vite + TypeScript** (no engine,
-DOM-rendered).
+A farming-simulator twist on **Klondike solitaire**. Play a Field (`F`) to
+**pick a land use** on a plot, stack that **13-card suit**, and **own the
+farm**. Crops and herd overlay like red and black. Manure from pasture and
+barn cycles back to the crop fields. The 66-card deck includes **14 event
+wildcards**. Mobile-first web game built with **Vite + TypeScript**.
 
 ## Gameplay
 
-Cards arrive in **mini-decks of 5** — one season's hand. Place them on their
-**suit column**, fire a wildcard, or **sell** them for seeds.
+The deal is Klondike: **7 holding piles** (1 through 7, top face-up) plus a
+**stock**. Play follows optimal Klondike — flip buried cards first, put Aces
+and twos up, and do not empty a pile unless a Harvest (`★`) can fill it.
+The board **never grows extra columns**.
 
-### Vertically aligned suits
+### Pick a plot, own a farm
 
-The board is four columns, one per suit. Cards stack top-to-bottom like a
-tableau pile. Expansion adds an extra column that locks to the first suit you
-play on it.
+Each land-use suit is 13 ranks. **Rank 1 is the Field** (`F`). Playing it
+**leases** that plot as that land use. Stack **2 → ★** of the same suit.
+When the 13th card lands, the lease becomes an **owned farm**.
 
-| Column | Suit | Role |
+| Plot | Family | Routes to |
 | --- | --- | --- |
-| 🏚️ **Barns** | Field | Capital. Holds cattle. |
-| 🌱 **Crops** | Seed | Production. Season-gated. Harvest for grain. |
-| 🚜 **Tractors** | Equipment | Capital. Lifts harvest yield. |
-| 🐄 **Cattle** | Livestock | Production. Fold into the Pasture. |
+| Annual 🌾 | Crop (gold) | Crop field |
+| Perennial 🍎 | Crop (gold) | Crop field |
+| Pasture 🐄 | Herd (rust) | Beef |
+| Barn 🥛 | Herd (rust) | Dairy |
 
-📐 **Expansion** and 💥 **Boom** stay instant (add a column, or pick grain / a cow).
+Crops overlay the herd in the holding set the same way **red overlays black**
+in solitaire. Annual and perennial are the two crop suits; pasture and barn
+are the two herd suits.
 
-### Stacks collapse into bigger assets
+### The manure cycle
 
-Three of the **same tier** in a column collapse into the next asset. That is
-how you level up how much you can manage:
+The late-game is circular, not extra piles:
 
-| Suit | Tier 1 | 3× → Tier 2 | 3× → Tier 3 |
-| --- | --- | --- | --- |
-| Barns | Wood barn | Steel barn | Modern barn |
-| Tractors | Compact | Utility | Combine |
-| Crops | Seedling | Standing crop | Bumper crop |
-| Cattle | Cow | Herd | Feedlot |
+1. Beef cards build the **pasture**. Dairy cards build the **barn**.
+2. Each herd card played onto those fields adds **manure** to the hopper
+   (richer once a herd farm is owned).
+3. **Fertilize** spends manure to promote a legal crop-field card (annual or
+   perennial). If nothing is ready, the next field play is treated as safe.
+4. Owning a **crop** farm feeds the herd: pasture and barn F and 2s auto-play.
 
-- **Bigger barns** hold more cattle (wood +1, steel +3, modern +6, on top of a
-  base of 2).
-- **Bigger tractors** add that much extra grain when you harvest.
+| Owned farms | Unlock |
+| --- | --- |
+| 1 | **Recall** — pull the top card off a *leased* field when you need a builder. |
+| Crop farm | **Feed** — herd F and 2s auto-play after moves. |
+| Herd farm | **Richer manure** — pasture/barn plays add 2 manure. |
+| 3 | **Crew** — all F and 2s auto-play (they almost never help the tableau). |
+| 4 + 14 events | The cycle closes. You win. |
 
-### Idle token burn
+### 14 event wildcards
 
-Barns and tractors are capital: they **burn 🌱 tokens** every operating loan
-(wood/compact 1, steel/utility 2, modern/combine 4).
+Events do **not** stack in the holding set. **Hinders** auto-resolve when they
+become the waste top or a flipped hold top (you would skip them anyway).
+**Boosts** stay until you tap them.
 
-If **no cattle** are paying for the barns, barn burn **doubles**. If **no crops
-or grain** are paying for the tractors, tractor burn **doubles**. Overbuilding
-without production is how farms go bankrupt.
+| Event | Kind | Effect |
+| --- | --- | --- |
+| Rain 🌧️ | Boost | Next field play is safe (and can open a drought). |
+| Bumper 🌽 | Boost | Auto-play F and 2s. |
+| Fair 🎪 | Boost | Extra draw from stock. |
+| Drought ☀️ | Hinder | Fields close for 3 moves. |
+| Blight 🦠 | Hinder | A leased top returns to waste. Owned farms are safe. |
+| Storm 🌪️ | Hinder | A hold top blows onto waste. |
+| Lien 📜 | Hinder | No recall for 4 moves. |
 
-### Temperature
+Win when all **52** ranked cards sit on the four plots **and** all **14**
+events are resolved.
 
-Current season is **Spring → Summer → Fall → Winter**, cycling each time you
-draw a mini-deck. Wrong-season Seeds cannot be planted — sell them instead.
+### Holding set
 
-### Seeds, seasons & operating loans
+The seven piles are a solitaire tableau. Build **down by one rank** in the
+**opposite family** (crops on herd, herd on crops). Empty holds only take a
+Harvest (`★`), like a King. Face-up runs move together. Turning a pile over
+flips the next card.
 
-- The **first mini-deck is free**. Each later one costs **2 seeds plus capital
-  burn**. You start with 5 seeds.
-- When your hand empties: if the **deck is empty you're done**; if you **can't
-  afford the next loan you go bankrupt**.
-- **Sell** a card for seeds (+1, Expansion/Boom +2). Harvesting also returns seeds.
+### Stock & waste
 
-### The living herd
-
-Every new season each animal **eats 1 grain**. Unfed animals **starve** (those
-furthest from payoff first). Animals **age**, and at the end of their 3-season
-life they **cash out** (+8). Herd size is capped by barn capacity. Survivors
-are sold for a bonus when the deck runs out.
+Tap the stock to turn one card onto the waste. Play the waste top onto a
+Field or a holding pile. When the stock is empty, tap ♻️ to recycle the waste.
 
 ### Controls (touch + mouse)
 
-- **Tap a held card**, then **tap its suit column** to stack it (legal columns
-  glow green). Three of a kind collapse automatically.
-- **Tap Expansion** to add a column. **Tap Boom**, then pick grain or a cow.
-- **💰 Sell** converts the selected card into seeds.
-- When the hand is empty, **🌱 Take Loan** draws the next season's mini-deck,
-  charges upkeep, and feeds/ages the herd.
-- **🌾 Harvest** folds the crop column. **🐄 Cattle** folds livestock into the
-  pasture. **🌱 New Farm** reshuffles.
-- Add `?seed=N` to the URL for a reproducible (shareable) deal.
+- **Tap a face-up card**, then a **glowing Field or hold pile**.
+- **Tap a selected card again** to send it to its Field if that is legal.
+- **Tap an event** to resolve a boost (hinders fire on their own).
+- **🌾 Play F & 2s** only promotes safe cards (Aces, twos, then ranks whose opposite-family cards below are already up).
+- **💩 Fertilize** spends manure on the crop fields.
+- **🌱 New Farm** reshuffles. Add `?seed=N` for a reproducible deal.
 
 ## Development
 
@@ -138,11 +145,11 @@ your_application/wsgi.py    # `gunicorn your_application.wsgi` serves static/
 your_application/static/    # committed Vite build so Python deploys can load
 src/
   game/
-    cards.ts        # suits, asset tiers, seasons, deck, seeded shuffle
-    rules.ts        # vertical stacks, collapse, capacity, idle burn, herd
+    cards.ts        # 4 land uses × 13 ranks + 14 events; Field = rank 1
+    rules.ts        # fields, holding set, manure cycle, events
     rules.test.ts   # unit tests for the engine
   ui/
     render.ts       # HTML builders for the board
-  main.ts           # controller: taps, instants, loans
-  style.css         # cardboard tabletop + vertical suit columns
+  main.ts           # controller: select, drop, draw, fertilize, events
+  style.css         # cardboard tabletop + solitaire layout
 ```

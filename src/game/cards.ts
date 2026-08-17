@@ -1,123 +1,202 @@
-// Card model for AGRITAIRE v7.
+// Card model for AGRITAIRE — a circular farm on a Klondike grid.
 //
-// Placeable suits stack in vertically aligned columns. Three of the same
-// tier collapse into a bigger asset (wood barn → steel barn, compact
-// tractor → utility → combine). Expansion / Boom remain instant wildcards.
+// 66 cards: 4 land-use suits × 13 ranks (52) + 14 event wildcards.
+// Rank 1 is the Field that picks that land use on a plot.
+// Crops (annual / perennial) and herd land (pasture / barn) overlay
+// each other the way red and black do in solitaire.
+// Beef routes to pasture, dairy to the barn. Manure from the herd
+// returns to the crop fields — the late-game is that cycle, not extra columns.
 
-export type Suit = 'field' | 'seed' | 'equipment' | 'livestock' | 'expansion' | 'boom';
-export type SeasonName = 'spring' | 'summer' | 'fall' | 'winter';
-export type Tier = 1 | 2 | 3;
+export type Suit = 'annual' | 'perennial' | 'pasture' | 'barn';
+export type Family = 'crop' | 'herd';
+export type EventKind = 'rain' | 'bumper' | 'fair' | 'drought' | 'blight' | 'storm' | 'lien';
+export type EventPolarity = 'boost' | 'hinder';
 
 export interface SuitInfo {
   readonly suit: Suit;
   readonly emoji: string;
   readonly label: string;
+  readonly land: string;
+  readonly family: Family;
   readonly color: string;
 }
 
 export const SUIT_INFO: Record<Suit, SuitInfo> = {
-  field: { suit: 'field', emoji: '🏚️', label: 'Barns', color: 'field' },
-  seed: { suit: 'seed', emoji: '🌱', label: 'Crops', color: 'seed' },
-  equipment: { suit: 'equipment', emoji: '🚜', label: 'Tractors', color: 'equipment' },
-  livestock: { suit: 'livestock', emoji: '🐄', label: 'Cattle', color: 'livestock' },
-  expansion: { suit: 'expansion', emoji: '📐', label: 'Expansion', color: 'expansion' },
-  boom: { suit: 'boom', emoji: '💥', label: 'Boom', color: 'boom' },
+  annual: {
+    suit: 'annual',
+    emoji: '🌾',
+    label: 'Annual',
+    land: 'crop field',
+    family: 'crop',
+    color: 'annual',
+  },
+  perennial: {
+    suit: 'perennial',
+    emoji: '🍎',
+    label: 'Perennial',
+    land: 'crop field',
+    family: 'crop',
+    color: 'perennial',
+  },
+  pasture: {
+    suit: 'pasture',
+    emoji: '🐄',
+    label: 'Pasture',
+    land: 'beef',
+    family: 'herd',
+    color: 'pasture',
+  },
+  barn: {
+    suit: 'barn',
+    emoji: '🥛',
+    label: 'Barn',
+    land: 'dairy',
+    family: 'herd',
+    color: 'barn',
+  },
 };
 
-export const PLACEABLE_SUITS = ['field', 'seed', 'equipment', 'livestock'] as const;
+export const SUITS: Suit[] = ['annual', 'perennial', 'pasture', 'barn'];
+export const CROP_SUITS: Suit[] = ['annual', 'perennial'];
+export const HERD_SUITS: Suit[] = ['pasture', 'barn'];
 
-export interface AssetTier {
-  readonly tier: Tier;
+export const RANK_MIN = 1;
+export const RANK_MAX = 13;
+export const FIELD_RANK = 1;
+
+export const EVENT_KINDS: EventKind[] = [
+  'rain',
+  'bumper',
+  'fair',
+  'drought',
+  'blight',
+  'storm',
+  'lien',
+];
+export const EVENT_COPIES = 2;
+export const EVENT_COUNT = EVENT_KINDS.length * EVENT_COPIES;
+export const RANKED_COUNT = SUITS.length * RANK_MAX;
+export const DECK_SIZE = RANKED_COUNT + EVENT_COUNT;
+
+export interface EventInfo {
+  readonly kind: EventKind;
   readonly emoji: string;
   readonly label: string;
-  readonly short: string;
+  readonly polarity: EventPolarity;
+  readonly hint: string;
 }
 
-export const SUIT_TIERS: Record<(typeof PLACEABLE_SUITS)[number], readonly AssetTier[]> = {
-  field: [
-    { tier: 1, emoji: '🏚️', label: 'Wood barn', short: 'Wood' },
-    { tier: 2, emoji: '🏭', label: 'Steel barn', short: 'Steel' },
-    { tier: 3, emoji: '🏢', label: 'Modern barn', short: 'Modern' },
-  ],
-  seed: [
-    { tier: 1, emoji: '🌱', label: 'Seedling', short: 'Seed' },
-    { tier: 2, emoji: '🌾', label: 'Standing crop', short: 'Crop' },
-    { tier: 3, emoji: '🌻', label: 'Bumper crop', short: 'Bumper' },
-  ],
-  equipment: [
-    { tier: 1, emoji: '🚜', label: 'Compact tractor', short: 'Small' },
-    { tier: 2, emoji: '🛻', label: 'Utility tractor', short: 'Utility' },
-    { tier: 3, emoji: '🚛', label: 'Combine', short: 'Combine' },
-  ],
-  livestock: [
-    { tier: 1, emoji: '🐄', label: 'Cow', short: 'Cow' },
-    { tier: 2, emoji: '🐂', label: 'Herd', short: 'Herd' },
-    { tier: 3, emoji: '🏞️', label: 'Feedlot', short: 'Lot' },
-  ],
+export const EVENT_INFO: Record<EventKind, EventInfo> = {
+  rain: { kind: 'rain', emoji: '🌧️', label: 'Rain', polarity: 'boost', hint: 'Next field play is safe' },
+  bumper: { kind: 'bumper', emoji: '🌽', label: 'Bumper', polarity: 'boost', hint: 'Auto-play F and 2s' },
+  fair: { kind: 'fair', emoji: '🎪', label: 'Fair', polarity: 'boost', hint: 'Extra draw from stock' },
+  drought: {
+    kind: 'drought',
+    emoji: '☀️',
+    label: 'Drought',
+    polarity: 'hinder',
+    hint: 'Fields close for 3 moves',
+  },
+  blight: {
+    kind: 'blight',
+    emoji: '🦠',
+    label: 'Blight',
+    polarity: 'hinder',
+    hint: 'A leased top returns to waste',
+  },
+  storm: {
+    kind: 'storm',
+    emoji: '🌪️',
+    label: 'Storm',
+    polarity: 'hinder',
+    hint: 'A hold top blows onto waste',
+  },
+  lien: { kind: 'lien', emoji: '📜', label: 'Lien', polarity: 'hinder', hint: 'No recall for 4 moves' },
 };
 
-export const SEASONS: SeasonName[] = ['spring', 'summer', 'fall', 'winter'];
-
-export const SEASON_INFO: Record<SeasonName, { emoji: string; label: string }> = {
-  spring: { emoji: '🌸', label: 'Spring' },
-  summer: { emoji: '☀️', label: 'Summer' },
-  fall: { emoji: '🍂', label: 'Fall' },
-  winter: { emoji: '❄️', label: 'Winter' },
-};
-
-export const FIELD_COUNT = 10;
-export const SEEDS_PER_SEASON = 3;
-export const EQUIPMENT_COUNT = 8;
-export const LIVESTOCK_COUNT = 8;
-export const EXPANSION_COUNT = 3;
-export const BOOM_COUNT = 4;
-
-export interface Card {
+export interface RankedCard {
+  readonly kind: 'ranked';
   readonly id: string;
   readonly suit: Suit;
-  readonly tier: Tier;
-  readonly season?: SeasonName; // seeds only
+  readonly rank: number;
+  faceUp: boolean;
 }
 
-export function isInstant(card: Card): boolean {
-  return card.suit === 'expansion' || card.suit === 'boom';
+export interface EventCard {
+  readonly kind: 'event';
+  readonly id: string;
+  readonly event: EventKind;
+  readonly copy: number;
+  faceUp: boolean;
 }
 
-export function isPlaceable(suit: Suit): suit is (typeof PLACEABLE_SUITS)[number] {
-  return (PLACEABLE_SUITS as readonly string[]).includes(suit);
+export type Card = RankedCard | EventCard;
+
+export function isRanked(card: Card): card is RankedCard {
+  return card.kind === 'ranked';
 }
 
-export function assetTier(card: Card): AssetTier | null {
-  if (!isPlaceable(card.suit)) return null;
-  return SUIT_TIERS[card.suit][card.tier - 1] ?? SUIT_TIERS[card.suit][0];
+export function isEvent(card: Card): card is EventCard {
+  return card.kind === 'event';
+}
+
+export function isBoost(card: Card): boolean {
+  return isEvent(card) && EVENT_INFO[card.event].polarity === 'boost';
+}
+
+export function isHinder(card: Card): boolean {
+  return isEvent(card) && EVENT_INFO[card.event].polarity === 'hinder';
+}
+
+export function familyOf(suit: Suit): Family {
+  return SUIT_INFO[suit].family;
+}
+
+export function isCropSuit(suit: Suit): boolean {
+  return familyOf(suit) === 'crop';
+}
+
+export function isHerdSuit(suit: Suit): boolean {
+  return familyOf(suit) === 'herd';
+}
+
+export function isFieldCard(card: Card): boolean {
+  return isRanked(card) && card.rank === FIELD_RANK;
+}
+
+export function rankLabel(rank: number): string {
+  if (rank === 1) return 'F';
+  if (rank === 11) return 'J';
+  if (rank === 12) return 'Q';
+  if (rank === 13) return '★';
+  return String(rank);
 }
 
 export function cardLabel(card: Card): string {
-  if (card.suit === 'seed' && card.season && card.tier === 1) return SEASON_INFO[card.season].emoji;
-  const asset = assetTier(card);
-  if (asset) return asset.emoji;
-  return SUIT_INFO[card.suit].emoji;
+  if (isEvent(card)) {
+    const info = EVENT_INFO[card.event];
+    return `${info.label} (${info.polarity})`;
+  }
+  const info = SUIT_INFO[card.suit];
+  if (card.rank === FIELD_RANK) return `${info.label} Field · ${info.land}`;
+  if (card.rank === RANK_MAX) return `${info.label} Harvest`;
+  return `${info.label} ${rankLabel(card.rank)}`;
 }
 
-function ofSuit(suit: Suit, count: number, season?: SeasonName): Card[] {
-  return Array.from({ length: count }, (_, i) => ({
-    id: season ? `${suit}-${season}-${i + 1}` : `${suit}-${i + 1}`,
-    suit,
-    tier: 1 as Tier,
-    ...(season ? { season } : {}),
-  }));
-}
-
-/** Build the ordered deck (~45 cards). All dealt cards start at tier 1. */
+/** Ordered 66-card deck: 4×13 ranked land uses + 14 event wildcards. */
 export function createDeck(): Card[] {
-  return [
-    ...ofSuit('field', FIELD_COUNT),
-    ...SEASONS.flatMap((season) => ofSuit('seed', SEEDS_PER_SEASON, season)),
-    ...ofSuit('equipment', EQUIPMENT_COUNT),
-    ...ofSuit('livestock', LIVESTOCK_COUNT),
-    ...ofSuit('expansion', EXPANSION_COUNT),
-    ...ofSuit('boom', BOOM_COUNT),
-  ];
+  const deck: Card[] = [];
+  for (const suit of SUITS) {
+    for (let rank = RANK_MIN; rank <= RANK_MAX; rank++) {
+      deck.push({ kind: 'ranked', id: `${suit}-${rank}`, suit, rank, faceUp: false });
+    }
+  }
+  for (const event of EVENT_KINDS) {
+    for (let copy = 1; copy <= EVENT_COPIES; copy++) {
+      deck.push({ kind: 'event', id: `event-${event}-${copy}`, event, copy, faceUp: false });
+    }
+  }
+  return deck;
 }
 
 /** Deterministic PRNG (mulberry32) so games can be seeded/reproduced. */

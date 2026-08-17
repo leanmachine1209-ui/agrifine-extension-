@@ -1,476 +1,401 @@
 import { describe, it, expect } from 'vitest';
-import { Card, Suit, SeasonName, Tier, createDeck, shuffle, mulberry32 } from './cards';
+import {
+  Card,
+  Suit,
+  RANK_MAX,
+  DECK_SIZE,
+  EVENT_COUNT,
+  RANKED_COUNT,
+  createDeck,
+  shuffle,
+  mulberry32,
+  rankLabel,
+  isFieldCard,
+  isEvent,
+  isRanked,
+  EventKind,
+} from './cards';
 import {
   GameState,
-  Column,
-  Cattle,
-  COLUMN_COUNT,
-  COLUMN_CAP,
-  MINI_DECK_SIZE,
-  SEEDS_START,
-  MINI_DECK_COST,
-  HARVEST_SEED_YIELD,
-  CATTLE_LIFESPAN,
-  CATTLE_CASHOUT,
-  HERD_END_BONUS,
-  INSTANT_SELL_VALUE,
-  BASE_CATTLE_CAP,
+  HOLDING_PILES,
   newGame,
-  currentSeason,
-  canPlace,
-  feedCost,
-  sellValue,
-  sellCard,
-  canDrawMiniDeck,
-  drawMiniDeck,
-  advanceHerd,
-  placeFromHand,
-  playExpansion,
-  playBoom,
-  canFold,
-  foldColumn,
-  cardsRemaining,
-  collapseColumn,
-  barnCapacity,
-  tractorPower,
-  capitalBurn,
-  loanCost,
-  enforceCapacity,
+  deal,
+  canPlaceOnField,
+  canStackOnHold,
+  isValidRun,
+  getMovableCards,
+  validTargets,
+  moveCards,
+  sendToField,
+  drawFromStock,
+  autoPlayFields,
+  isWon,
+  topOf,
+  emptyFields,
+  fieldTenure,
+  ownedFarms,
+  isSafeFieldPlay,
+  canRecallFromLease,
+  hasCrew,
+  advise,
+  fertilize,
+  resolveEvent,
+  autoResolveHinders,
+  ownedHerdFarms,
+  cardsInPlay,
 } from './rules';
 
-function c(suit: Suit, season?: SeasonName, id?: string, tier: Tier = 1): Card {
+function card(suit: Suit, rank: number, faceUp = true): Card {
+  return { kind: 'ranked', id: `${suit}-${rank}`, suit, rank, faceUp };
+}
+
+function eventCard(event: EventKind, copy = 1, faceUp = true): Card {
+  return { kind: 'event', id: `event-${event}-${copy}`, event, copy, faceUp };
+}
+
+function state(overrides: Partial<GameState> = {}): GameState {
   return {
-    id: id ?? (season ? `${suit}-${season}` : `${suit}-1`),
-    suit,
-    tier,
-    ...(season ? { season } : {}),
-  };
-}
-function col(suit: Suit | null, cards: Card[] = []): Column {
-  return { suit, cards };
-}
-function cows(...lives: number[]): Cattle[] {
-  return lives.map((life, i) => ({ id: `cow-${i}`, life }));
-}
-function baseState(overrides: Partial<GameState> = {}): GameState {
-  return {
-    deck: [],
-    hand: [],
-    seeds: SEEDS_START,
-    columns: [
-      col('field'),
-      col('seed'),
-      col('equipment'),
-      col('livestock'),
-    ],
-    grain: 0,
-    herd: [],
+    stock: [],
+    waste: [],
+    fields: emptyFields(),
+    holding: Array.from({ length: HOLDING_PILES }, () => []),
+    resolved: [],
+    manure: 0,
+    droughtMoves: 0,
+    lienMoves: 0,
+    rainSafe: false,
+    moves: 0,
     score: 0,
-    season: 1,
-    sold: 0,
-    cattleCashed: 0,
-    cattleStarved: 0,
-    nextCow: 0,
-    nextMerge: 0,
-    tokensBurned: 0,
-    over: false,
-    failed: false,
-    rng: () => 0.5,
+    recycled: 0,
     ...overrides,
   };
 }
 
-describe('deck & new game', () => {
-  it('has 45 cards; new game deals a free mini-deck onto 4 suit columns', () => {
-    expect(createDeck()).toHaveLength(45);
-    expect(createDeck().every((card) => card.tier === 1)).toBe(true);
-    const s = newGame(3);
-    expect(s.hand).toHaveLength(MINI_DECK_SIZE);
-    expect(s.seeds).toBe(SEEDS_START);
-    expect(s.herd).toHaveLength(0);
-    expect(s.columns).toHaveLength(COLUMN_COUNT);
-    expect(s.columns.map((column) => column.suit)).toEqual([
-      'field',
-      'seed',
-      'equipment',
-      'livestock',
-    ]);
-    expect(cardsRemaining(s)).toBe(45);
-    expect(currentSeason(1)).toBe('spring');
-    expect(currentSeason(2)).toBe('summer');
-    expect(currentSeason(4)).toBe('winter');
-    expect(currentSeason(5)).toBe('spring');
+describe('deck & deal', () => {
+  it('builds a 66-card deck: 4×13 land uses plus 14 events', () => {
+    const deck = createDeck();
+    expect(deck).toHaveLength(DECK_SIZE);
+    expect(deck.filter(isRanked)).toHaveLength(RANKED_COUNT);
+    expect(deck.filter(isEvent)).toHaveLength(EVENT_COUNT);
+    expect(deck.filter((c) => isRanked(c) && c.suit === 'annual')).toHaveLength(13);
+    expect(deck.filter(isFieldCard)).toHaveLength(4);
+    expect(rankLabel(1)).toBe('F');
+    expect(rankLabel(13)).toBe('★');
+  });
+
+  it('deals 7 holding piles (1..7) with only the top face-up, rest in stock', () => {
+    const s = newGame(7);
+    expect(s.holding).toHaveLength(7);
+    expect(s.holding.every((p) => p.length === 0 || p[p.length - 1].faceUp)).toBe(true);
+    expect(s.fields.annual).toHaveLength(0);
+    expect(cardsInPlay(s)).toBe(DECK_SIZE);
+    expect(s.holding.reduce((n, p) => n + p.length, 0) + s.stock.length + s.waste.length + s.resolved.length).toBe(
+      DECK_SIZE,
+    );
   });
 
   it('seeded shuffle is reproducible', () => {
-    const a = shuffle(createDeck(), mulberry32(9)).map((x) => x.id);
-    const b = shuffle(createDeck(), mulberry32(9)).map((x) => x.id);
+    const a = shuffle(createDeck(), mulberry32(9)).map((c) => c.id);
+    const b = shuffle(createDeck(), mulberry32(9)).map((c) => c.id);
     expect(a).toEqual(b);
   });
+
+  it('deal mutates the passed deck into a legal layout', () => {
+    const deck = createDeck();
+    const s = deal(deck);
+    expect(deck).toHaveLength(0);
+    expect(cardsInPlay(s)).toBe(DECK_SIZE);
+  });
 });
 
-describe('vertically aligned suits', () => {
-  it('each column only accepts its own suit', () => {
-    const barns = col('field');
-    const crops = col('seed');
-    expect(canPlace(c('field'), barns, 'spring')).toBe(true);
-    expect(canPlace(c('seed', 'spring'), barns, 'spring')).toBe(false);
-    expect(canPlace(c('equipment'), barns, 'spring')).toBe(false);
-    expect(canPlace(c('seed', 'spring'), crops, 'spring')).toBe(true);
-    expect(canPlace(c('field'), crops, 'spring')).toBe(false);
+describe('field stacks (land uses picked on the plots)', () => {
+  it('an empty field only accepts the Field card (rank 1) of that land use', () => {
+    expect(canPlaceOnField(card('annual', 1), [])).toBe(true);
+    expect(canPlaceOnField(card('annual', 2), [])).toBe(false);
+    expect(canPlaceOnField(card('pasture', 1), [])).toBe(true);
+    expect(canPlaceOnField(eventCard('rain'), [])).toBe(false);
   });
 
-  it('rejects the wrong-season Seed on the crop column', () => {
-    const crops = col('seed');
-    expect(canPlace(c('seed', 'spring'), crops, 'spring')).toBe(true);
-    expect(canPlace(c('seed', 'winter'), crops, 'spring')).toBe(false);
+  it('stacks the same land use in order up to 13, not identical cards', () => {
+    const field = [card('annual', 1), card('annual', 2)];
+    expect(canPlaceOnField(card('annual', 3), field)).toBe(true);
+    expect(canPlaceOnField(card('annual', 2), field)).toBe(false);
+    expect(canPlaceOnField(card('annual', 1), field)).toBe(false);
+    expect(canPlaceOnField(card('perennial', 3), field)).toBe(false);
   });
 
-  it('instant cards never sit on a column', () => {
-    expect(canPlace(c('expansion'), col('field'), 'spring')).toBe(false);
-    expect(canPlace(c('boom'), col(null), 'spring')).toBe(false);
-  });
-
-  it('an Expansion extra locks to the first suit played', () => {
-    const s = baseState({
-      hand: [c('field', undefined, 'field-1')],
-      columns: [...baseState().columns, col(null)],
+  it('playing a Field from waste leases that plot, then the next rank', () => {
+    const s = state({
+      waste: [card('pasture', 1)],
     });
-    expect(placeFromHand(s, 'field-1', 4)).toBe(true);
-    expect(s.columns[4].suit).toBe('field');
-    expect(s.columns[4].cards).toHaveLength(1);
-  });
-});
-
-describe('collapsing stacks', () => {
-  it('three wood barns collapse into a steel barn', () => {
-    const barns = col('field', [c('field', undefined, 'a'), c('field', undefined, 'b'), c('field', undefined, 'c')]);
-    let n = 0;
-    collapseColumn(barns, () => `m-${n++}`);
-    expect(barns.cards).toHaveLength(1);
-    expect(barns.cards[0].tier).toBe(2);
-    expect(barns.cards[0].suit).toBe('field');
+    expect(sendToField(s, 'pasture-1')).toBe(true);
+    expect(fieldTenure(s.fields.pasture)).toBe('leased');
+    expect(s.fields.pasture[0] && isRanked(s.fields.pasture[0]) && s.fields.pasture[0].rank).toBe(1);
+    s.waste.push(card('pasture', 2));
+    expect(sendToField(s, 'pasture-2')).toBe(true);
+    expect(s.fields.pasture.map((c) => (isRanked(c) ? c.rank : 0))).toEqual([1, 2]);
+    expect(ownedFarms(s)).toBe(0);
   });
 
-  it('three steel barns collapse into a modern barn', () => {
-    const barns = col('field', [
-      c('field', undefined, 'a', 2),
-      c('field', undefined, 'b', 2),
-      c('field', undefined, 'c', 2),
-    ]);
-    collapseColumn(barns, () => 'm-1');
-    expect(barns.cards).toHaveLength(1);
-    expect(barns.cards[0].tier).toBe(3);
-  });
-
-  it('three compact tractors collapse into a utility tractor, then three utilities into a combine', () => {
-    const tractors = col('equipment', [
-      c('equipment', undefined, 'a'),
-      c('equipment', undefined, 'b'),
-      c('equipment', undefined, 'c'),
-    ]);
-    collapseColumn(tractors, () => 'u-1');
-    expect(tractors.cards[0].tier).toBe(2);
-
-    tractors.cards.push(c('equipment', undefined, 'd', 2), c('equipment', undefined, 'e', 2));
-    collapseColumn(tractors, () => 'c-1');
-    expect(tractors.cards).toHaveLength(1);
-    expect(tractors.cards[0].tier).toBe(3);
-  });
-
-  it('modern barns do not collapse further', () => {
-    const barns = col('field', [
-      c('field', undefined, 'a', 3),
-      c('field', undefined, 'b', 3),
-      c('field', undefined, 'c', 3),
-    ]);
-    collapseColumn(barns, () => 'x');
-    expect(barns.cards).toHaveLength(3);
-  });
-
-  it('placing the third wood barn from hand collapses the stack', () => {
-    const s = baseState({
-      hand: [c('field', undefined, 'field-3')],
+  it('completing a 13-card suit owns the farm and never adds a yard column', () => {
+    const s = state({
+      waste: [card('annual', 13)],
+      fields: {
+        ...emptyFields(),
+        annual: Array.from({ length: 12 }, (_, i) => card('annual', i + 1)),
+      },
     });
-    s.columns[0].cards = [c('field', undefined, 'field-1'), c('field', undefined, 'field-2')];
-    expect(placeFromHand(s, 'field-3', 0)).toBe(true);
-    expect(s.columns[0].cards).toHaveLength(1);
-    expect(s.columns[0].cards[0].tier).toBe(2);
+    expect(fieldTenure(s.fields.annual)).toBe('leased');
+    expect(sendToField(s, 'annual-13')).toBe(true);
+    expect(fieldTenure(s.fields.annual)).toBe('owned');
+    expect(ownedFarms(s)).toBe(1);
+    expect(canRecallFromLease(s)).toBe(true);
+    expect(s.holding).toHaveLength(7);
   });
 });
 
-describe('capacity — leveling up management', () => {
-  it('wood barns add cattle slots; steel/modern add more', () => {
-    const s = baseState();
-    expect(barnCapacity(s)).toBe(BASE_CATTLE_CAP);
-    s.columns[0].cards = [c('field', undefined, 'w', 1)];
-    expect(barnCapacity(s)).toBe(BASE_CATTLE_CAP + 1);
-    s.columns[0].cards = [c('field', undefined, 's', 2)];
-    expect(barnCapacity(s)).toBe(BASE_CATTLE_CAP + 3);
-    s.columns[0].cards = [c('field', undefined, 'm', 3)];
-    expect(barnCapacity(s)).toBe(BASE_CATTLE_CAP + 6);
+describe('holding set (solitaire tableau)', () => {
+  it('empty hold only accepts a Harvest (rank 13), like a King', () => {
+    expect(canStackOnHold(card('annual', 13), undefined)).toBe(true);
+    expect(canStackOnHold(card('annual', 12), undefined)).toBe(false);
+    expect(canStackOnHold(eventCard('rain'), undefined)).toBe(false);
   });
 
-  it('bigger tractors lift harvest yield', () => {
-    const s = baseState({
-      columns: [
-        col('field'),
-        col('seed', [c('seed', 'spring', 'seed-1'), c('seed', 'spring', 'seed-2')]),
-        col('equipment', [c('equipment', undefined, 't', 2)]),
-        col('livestock'),
+  it('builds down by one rank with crops overlaying the herd (red/black)', () => {
+    const crop = card('annual', 10);
+    expect(canStackOnHold(card('pasture', 9), crop)).toBe(true);
+    expect(canStackOnHold(card('barn', 9), crop)).toBe(true);
+    expect(canStackOnHold(card('perennial', 9), crop)).toBe(false);
+    expect(canStackOnHold(card('pasture', 8), crop)).toBe(false);
+  });
+
+  it('a holding run must be face-up, descending, and alternating families', () => {
+    expect(isValidRun([card('annual', 8), card('pasture', 7), card('perennial', 6)])).toBe(true);
+    expect(isValidRun([card('annual', 8), card('perennial', 7)])).toBe(false);
+    expect(isValidRun([card('annual', 8, false), card('pasture', 7)])).toBe(false);
+    expect(isValidRun([card('annual', 8), eventCard('rain')])).toBe(false);
+  });
+
+  it('moves a run from one hold pile onto another and flips the exposed card', () => {
+    const s = state({
+      holding: [
+        [card('barn', 5, false), card('annual', 10), card('pasture', 9)],
+        [card('pasture', 11)],
+        [],
+        [],
+        [],
+        [],
+        [],
       ],
     });
-    expect(tractorPower(s)).toBe(3);
-    expect(foldColumn(s, 1, 'grain')).toBe(true);
-    expect(s.grain).toBe(2 + 3);
-    expect(s.seeds).toBe(SEEDS_START + HARVEST_SEED_YIELD);
-    expect(s.columns[1].cards).toHaveLength(0);
+    expect(moveCards(s, 'annual-10', { type: 'hold', index: 1 })).toBe(true);
+    expect(s.holding[1].map((c) => c.id)).toEqual(['pasture-11', 'annual-10', 'pasture-9']);
+    expect(s.holding[0]).toHaveLength(1);
+    expect(s.holding[0][0].faceUp).toBe(true);
+  });
+});
+
+describe('stock, waste, and legal grabs', () => {
+  it('draws stock onto waste, then recycles waste back to stock', () => {
+    const s = state({
+      stock: [card('annual', 4, false), card('perennial', 5, false)],
+    });
+    expect(drawFromStock(s)).toBe(true);
+    expect(topOf(s.waste)?.id).toBe('perennial-5');
+    expect(s.waste[0].faceUp).toBe(true);
+    drawFromStock(s);
+    expect(s.stock).toHaveLength(0);
+    expect(drawFromStock(s)).toBe(true);
+    expect(s.recycled).toBe(1);
+    expect(s.stock).toHaveLength(2);
+    expect(s.waste).toHaveLength(0);
   });
 
-  it('cattle fold is capped by barn capacity; extras starve', () => {
-    const s = baseState({
-      columns: [
-        col('field'),
-        col('seed'),
-        col('equipment'),
-        col('livestock', [
-          c('livestock', undefined, 'a'),
-          c('livestock', undefined, 'b'),
-          c('livestock', undefined, 'c'),
-        ]),
+  it('only the waste top and a valid hold run are movable', () => {
+    const s = state({
+      waste: [card('annual', 1), card('perennial', 2)],
+      holding: [[card('pasture', 8), card('annual', 7)], [], [], [], [], [], []],
+    });
+    expect(getMovableCards(s, 'annual-1')).toBeNull();
+    expect(getMovableCards(s, 'perennial-2')?.map((c) => c.id)).toEqual(['perennial-2']);
+    expect(getMovableCards(s, 'pasture-8')?.map((c) => c.id)).toEqual(['pasture-8', 'annual-7']);
+  });
+
+  it('validTargets lists the matching empty field for a Field card', () => {
+    const s = state({ waste: [card('barn', 1)] });
+    expect(validTargets(s, 'barn-1')).toEqual([{ type: 'field', suit: 'barn' }]);
+  });
+});
+
+describe('manure cycle', () => {
+  it('pasture and barn plays fill the hopper; fertilize spends it on crops', () => {
+    const s = state({
+      waste: [card('annual', 1), card('pasture', 1)],
+    });
+    expect(sendToField(s, 'pasture-1')).toBe(true);
+    expect(s.manure).toBe(1);
+    expect(ownedHerdFarms(s)).toBe(0);
+    expect(fertilize(s)).toBe(true);
+    expect(s.manure).toBe(0);
+    expect(s.fields.annual.map((c) => (isRanked(c) ? c.rank : 0))).toEqual([1]);
+  });
+
+  it('owning a herd farm enriches manure and never opens an 8th hold', () => {
+    const s = state({
+      waste: [card('barn', 2)],
+      fields: {
+        ...emptyFields(),
+        pasture: Array.from({ length: RANK_MAX }, (_, i) => card('pasture', i + 1)),
+        barn: [card('barn', 1)],
+      },
+    });
+    expect(s.holding).toHaveLength(7);
+    expect(sendToField(s, 'barn-2')).toBe(true);
+    expect(s.manure).toBe(2);
+    expect(s.holding).toHaveLength(7);
+  });
+
+  it('fertilize with nothing to promote still spends manure and makes the next field play safe', () => {
+    const s = state({ manure: 1, droughtMoves: 2 });
+    expect(fertilize(s)).toBe(true);
+    expect(s.manure).toBe(0);
+    expect(s.rainSafe).toBe(true);
+    s.waste.push(card('annual', 1));
+    expect(sendToField(s, 'annual-1')).toBe(true);
+    expect(s.fields.annual).toHaveLength(1);
+  });
+});
+
+describe('events', () => {
+  it('a hinder on waste auto-resolves; drought closes the fields', () => {
+    const s = state({
+      stock: [eventCard('drought', 1, false)],
+      waste: [card('annual', 1)],
+    });
+    expect(sendToField(s, 'annual-1')).toBe(true);
+    expect(drawFromStock(s)).toBe(true);
+    expect(s.waste).toHaveLength(0);
+    expect(s.resolved.map((c) => (isEvent(c) ? c.event : ''))).toEqual(['drought']);
+    expect(s.droughtMoves).toBe(3);
+    s.waste.push(card('perennial', 1));
+    expect(sendToField(s, 'perennial-1')).toBe(false);
+    expect(s.fields.perennial).toHaveLength(0);
+  });
+
+  it('a boost stays on waste until tapped', () => {
+    const s = state({ waste: [eventCard('rain')] });
+    autoResolveHinders(s);
+    expect(s.waste).toHaveLength(1);
+    expect(resolveEvent(s, 'event-rain-1')).toBe(true);
+    expect(s.rainSafe).toBe(true);
+    expect(s.resolved).toHaveLength(1);
+    expect(s.waste).toHaveLength(0);
+  });
+
+  it('blight returns a leased top to waste; owned farms are skipped', () => {
+    const s = state({
+      waste: [eventCard('blight')],
+      fields: {
+        ...emptyFields(),
+        annual: Array.from({ length: RANK_MAX }, (_, i) => card('annual', i + 1)),
+        pasture: [card('pasture', 1), card('pasture', 2)],
+      },
+    });
+    expect(resolveEvent(s, 'event-blight-1')).toBe(true);
+    expect(s.fields.annual).toHaveLength(RANK_MAX);
+    expect(s.fields.pasture.map((c) => (isRanked(c) ? c.rank : 0))).toEqual([1]);
+    expect(topOf(s.waste)?.id).toBe('pasture-2');
+  });
+
+  it('events cannot stack in the holding set', () => {
+    const s = state({
+      waste: [eventCard('fair')],
+      holding: [[card('annual', 8)], [], [], [], [], [], []],
+    });
+    expect(moveCards(s, 'event-fair-1', { type: 'hold', index: 0 })).toBe(false);
+    expect(getMovableCards(s, 'event-fair-1')).toBeNull();
+  });
+});
+
+describe('auto-play, tenure, and optimal play', () => {
+  it('autoPlayFields only promotes F and 2s (safe Klondike plays)', () => {
+    const s = state({
+      waste: [card('annual', 1)],
+      holding: [[card('annual', 2)], [card('annual', 3)], [], [], [], [], []],
+    });
+    expect(autoPlayFields(s)).toBe(2);
+    expect(s.fields.annual.map((c) => (isRanked(c) ? c.rank : 0))).toEqual([1, 2]);
+    expect(s.holding[1]).toHaveLength(1);
+  });
+
+  it('a mid-rank is not safe until opposite-family ranks below are up', () => {
+    const s = state({
+      fields: {
+        ...emptyFields(),
+        annual: [card('annual', 1), card('annual', 2)],
+      },
+    });
+    expect(isSafeFieldPlay(s, card('annual', 3))).toBe(false);
+    s.fields.pasture = [card('pasture', 1), card('pasture', 2)];
+    s.fields.barn = [card('barn', 1), card('barn', 2)];
+    expect(isSafeFieldPlay(s, card('annual', 3))).toBe(true);
+  });
+
+  it('cannot recall from a lease until one farm is owned; lien also blocks recall', () => {
+    const s = state({
+      fields: { ...emptyFields(), annual: [card('annual', 1), card('annual', 2)] },
+      holding: [[card('pasture', 3)], [], [], [], [], [], []],
+    });
+    expect(canRecallFromLease(s)).toBe(false);
+    expect(getMovableCards(s, 'annual-2')).toBeNull();
+    s.fields.perennial = Array.from({ length: RANK_MAX }, (_, i) => card('perennial', i + 1));
+    expect(canRecallFromLease(s)).toBe(true);
+    s.lienMoves = 2;
+    expect(canRecallFromLease(s)).toBe(false);
+    s.lienMoves = 0;
+    expect(moveCards(s, 'annual-2', { type: 'hold', index: 0 })).toBe(true);
+    expect(s.fields.annual).toHaveLength(1);
+  });
+
+  it('the third owned farm turns the crew on, still on 7 holds', () => {
+    const s = state({
+      fields: {
+        annual: Array.from({ length: RANK_MAX }, (_, i) => card('annual', i + 1)),
+        perennial: Array.from({ length: RANK_MAX }, (_, i) => card('perennial', i + 1)),
+        pasture: Array.from({ length: RANK_MAX }, (_, i) => card('pasture', i + 1)),
+        barn: [],
+      },
+    });
+    expect(hasCrew(s)).toBe(true);
+    expect(s.holding).toHaveLength(7);
+  });
+
+  it('advise prefers a move that flips a buried card', () => {
+    const s = state({
+      holding: [
+        [card('barn', 4, false), card('annual', 10)],
+        [card('pasture', 11)],
+        [],
+        [],
+        [],
+        [],
+        [],
       ],
     });
-    expect(barnCapacity(s)).toBe(BASE_CATTLE_CAP);
-    expect(foldColumn(s, 3, 'cattle')).toBe(true);
-    expect(s.herd).toHaveLength(BASE_CATTLE_CAP);
-    expect(s.cattleStarved).toBe(1);
-  });
-});
-
-describe('idle token burn', () => {
-  it('empty farm burns nothing extra', () => {
-    expect(capitalBurn(baseState()).total).toBe(0);
-    expect(loanCost(baseState())).toBe(MINI_DECK_COST);
+    const tip = advise(s);
+    expect(tip.cardId).toBe('annual-10');
+    expect(tip.text).toMatch(/buried/);
   });
 
-  it('idle barns and tractors burn double when no cattle or crops pay', () => {
-    const s = baseState({
-      columns: [
-        col('field', [c('field', undefined, 'b', 2)]),
-        col('seed'),
-        col('equipment', [c('equipment', undefined, 't', 1)]),
-        col('livestock'),
-      ],
-    });
-    const burn = capitalBurn(s);
-    expect(burn.idleBarns).toBe(true);
-    expect(burn.idleTractors).toBe(true);
-    expect(burn.barns).toBe(4);
-    expect(burn.tractors).toBe(2);
-    expect(burn.total).toBe(6);
-    expect(loanCost(s)).toBe(MINI_DECK_COST + 6);
-  });
-
-  it('cattle pay for barns and grain/crops pay for tractors', () => {
-    const s = baseState({
-      grain: 4,
-      herd: cows(3),
-      columns: [
-        col('field', [c('field', undefined, 'b', 2)]),
-        col('seed'),
-        col('equipment', [c('equipment', undefined, 't', 1)]),
-        col('livestock'),
-      ],
-    });
-    const burn = capitalBurn(s);
-    expect(burn.idleBarns).toBe(false);
-    expect(burn.idleTractors).toBe(false);
-    expect(burn.barns).toBe(2);
-    expect(burn.tractors).toBe(1);
-    expect(burn.total).toBe(3);
-  });
-
-  it('taking a loan charges idle burn then the operating-loan fee', () => {
-    const s = baseState({
-      hand: [],
-      deck: [c('field'), c('seed', 'summer')],
-      seeds: 10,
-      columns: [
-        col('field', [c('field', undefined, 'b', 1)]),
-        col('seed'),
-        col('equipment'),
-        col('livestock'),
-      ],
-    });
-    expect(drawMiniDeck(s)).toBe(true);
-    expect(s.tokensBurned).toBe(2);
-    expect(s.seeds).toBe(10 - 2 - MINI_DECK_COST);
-    expect(s.season).toBe(2);
-  });
-});
-
-describe('expansion & boom', () => {
-  it('Expansion adds an open column and refuses past the cap', () => {
-    const s = baseState({ hand: [c('expansion', undefined, 'expansion-1')] });
-    expect(playExpansion(s, 'expansion-1')).toBe(true);
-    expect(s.columns).toHaveLength(5);
-    expect(s.columns[4].suit).toBeNull();
-    expect(s.hand).toHaveLength(0);
-
-    const full = baseState({
-      hand: [c('expansion', undefined, 'expansion-2')],
-      columns: Array.from({ length: COLUMN_CAP }, () => col(null)),
-    });
-    expect(playExpansion(full, 'expansion-2')).toBe(false);
-    expect(full.columns).toHaveLength(COLUMN_CAP);
-    expect(full.hand).toHaveLength(1);
-  });
-
-  it('Boom can add grain or a cow', () => {
-    const grain = baseState({
-      hand: [c('boom', undefined, 'boom-1')],
-      rng: () => 0,
-    });
-    expect(playBoom(grain, 'boom-1', 'grain')).toBe(true);
-    expect(grain.grain).toBe(1);
-    expect(grain.hand).toHaveLength(0);
-
-    const cow = baseState({ hand: [c('boom', undefined, 'boom-2')] });
-    expect(playBoom(cow, 'boom-2', 'cow')).toBe(true);
-    expect(cow.herd).toHaveLength(1);
-    expect(cow.herd[0].life).toBe(CATTLE_LIFESPAN);
-  });
-
-  it('sells instants for extra seeds', () => {
-    expect(sellValue(c('boom'))).toBe(INSTANT_SELL_VALUE);
-    const s = baseState({ hand: [c('boom', undefined, 'boom-1')], seeds: 5 });
-    expect(sellCard(s, 'boom-1')).toBe(true);
-    expect(s.seeds).toBe(5 + INSTANT_SELL_VALUE);
-  });
-});
-
-describe('mini-deck loans', () => {
-  it('draws only when hand empty, deck remains, and affordable', () => {
-    expect(canDrawMiniDeck(baseState({ hand: [], deck: [c('field')], seeds: MINI_DECK_COST }))).toBe(
-      true,
-    );
-    expect(canDrawMiniDeck(baseState({ hand: [c('field')], deck: [c('seed', 'spring')], seeds: 5 }))).toBe(
-      false,
-    );
-    expect(canDrawMiniDeck(baseState({ hand: [], deck: [c('field')], seeds: MINI_DECK_COST - 1 }))).toBe(
-      false,
-    );
-  });
-
-  it('taking the loan spends seeds, bumps the season, and draws', () => {
-    const s = baseState({ hand: [], deck: [c('field'), c('seed', 'summer'), c('equipment')], seeds: 5 });
-    expect(drawMiniDeck(s)).toBe(true);
-    expect(s.seeds).toBe(5 - MINI_DECK_COST);
-    expect(s.season).toBe(2);
-    expect(s.hand).toHaveLength(3);
-    expect(currentSeason(s.season)).toBe('summer');
-  });
-});
-
-describe('folding production', () => {
-  it('cannot harvest an empty crop column or a barn column', () => {
-    expect(canFold(col('seed'), 'grain')).toBe(false);
-    expect(canFold(col('field', [c('field')]), 'grain')).toBe(false);
-    expect(canFold(col('seed', [c('seed', 'spring')]), 'grain')).toBe(true);
-    expect(canFold(col('livestock', [c('livestock')]), 'cattle')).toBe(true);
-  });
-});
-
-describe('living herd', () => {
-  it('eats grain each season (feedCost)', () => {
-    const s = baseState({
-      grain: 5,
-      herd: cows(2, 2, 2),
-      columns: [col('field', [c('field', undefined, 'b', 2)]), col('seed'), col('equipment'), col('livestock')],
-    });
-    expect(feedCost(s)).toBe(3);
-    advanceHerd(s);
-    expect(s.grain).toBe(2);
-    expect(s.herd.every((cow) => cow.life === 1)).toBe(true);
-  });
-
-  it('starves animals when grain runs short (feeds those closest to cash-out)', () => {
-    const s = baseState({
-      grain: 1,
-      herd: cows(3, 2, 3),
-      columns: [col('field', [c('field', undefined, 'b', 2)]), col('seed'), col('equipment'), col('livestock')],
-    });
-    advanceHerd(s);
-    expect(s.cattleStarved).toBe(2);
-    expect(s.herd).toHaveLength(1);
-    expect(s.herd[0].life).toBe(1);
-    expect(s.grain).toBe(0);
-  });
-
-  it('cashes out big points when an animal reaches end of life', () => {
-    const s = baseState({ grain: 10, herd: cows(1, 1) });
-    advanceHerd(s);
-    expect(s.cattleCashed).toBe(2);
-    expect(s.score).toBe(2 * CATTLE_CASHOUT);
-    expect(s.herd).toHaveLength(0);
-  });
-
-  it('taking a loan feeds and ages the herd', () => {
-    const s = baseState({
-      hand: [],
-      deck: [c('field'), c('equipment')],
-      grain: 4,
-      herd: cows(3),
-      seeds: 5,
-    });
-    expect(drawMiniDeck(s)).toBe(true);
-    expect(s.grain).toBe(3);
-    expect(s.herd[0].life).toBe(2);
-  });
-
-  it('over-capacity herd is culled to barn space', () => {
-    const s = baseState({ herd: cows(3, 3, 2, 1) });
-    expect(barnCapacity(s)).toBe(BASE_CATTLE_CAP);
-    enforceCapacity(s);
-    expect(s.herd).toHaveLength(BASE_CATTLE_CAP);
-    expect(s.cattleStarved).toBe(2);
-  });
-});
-
-describe('end conditions', () => {
-  it('finishing the deck sells surviving cattle for a bonus', () => {
-    const s = baseState({ hand: [c('field')], deck: [], herd: cows(2, 2) });
-    placeFromHand(s, 'field-1', 0);
-    expect(s.over).toBe(true);
-    expect(s.failed).toBe(false);
-    expect(s.score).toBe(2 * HERD_END_BONUS);
-  });
-
-  it('emptying the hand while broke and cards remain = bankruptcy', () => {
-    const s = baseState({
-      hand: [c('field')],
-      deck: [c('seed', 'spring')],
-      seeds: MINI_DECK_COST - 1,
-    });
-    placeFromHand(s, 'field-1', 0);
-    expect(s.over).toBe(true);
-    expect(s.failed).toBe(true);
-  });
-
-  it('idle capital can bankrupt you even with enough seeds for a bare loan', () => {
-    const s = baseState({
-      hand: [c('field', undefined, 'field-x')],
-      deck: [c('seed', 'spring')],
-      seeds: MINI_DECK_COST,
-      columns: [
-        col('field', [c('field', undefined, 'b', 2)]),
-        col('seed'),
-        col('equipment'),
-        col('livestock'),
-      ],
-    });
-    placeFromHand(s, 'field-x', 0);
-    expect(s.over).toBe(true);
-    expect(s.failed).toBe(true);
+  it('is won only when every farm is owned and all 14 events are resolved', () => {
+    const s = state();
+    expect(isWon(s)).toBe(false);
+    for (const suit of ['annual', 'perennial', 'pasture', 'barn'] as Suit[]) {
+      s.fields[suit] = Array.from({ length: RANK_MAX }, (_, i) => card(suit, i + 1));
+    }
+    expect(isWon(s)).toBe(false);
+    s.resolved = Array.from({ length: EVENT_COUNT }, (_, i) => eventCard('rain', i + 1));
+    expect(isWon(s)).toBe(true);
+    expect(ownedFarms(s)).toBe(4);
   });
 });

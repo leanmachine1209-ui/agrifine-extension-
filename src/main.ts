@@ -1,17 +1,26 @@
 import './style.css';
+import { Suit } from './game/cards';
 import {
   GameState,
-  FoldMode,
+  PileRef,
   newGame,
-  placeFromHand,
-  sellCard,
-  drawMiniDeck,
-  foldColumn,
-  playExpansion,
-  playBoom,
+  moveCards,
+  drawFromStock,
+  sendToField,
+  autoPlayFields,
+  developAfterMove,
+  resolveEvent,
+  fertilize,
+  isWon,
 } from './game/rules';
-import { isInstant } from './game/cards';
 import { boardHTML, overOverlayHTML, RenderModel } from './ui/render';
+
+function destFromEl(el: HTMLElement): PileRef | null {
+  const dest = el.dataset.dest;
+  if (dest === 'field' && el.dataset.suit) return { type: 'field', suit: el.dataset.suit as Suit };
+  if (dest === 'hold' && el.dataset.col !== undefined) return { type: 'hold', index: Number(el.dataset.col) };
+  return null;
+}
 
 export class Agritaire {
   private root: HTMLElement;
@@ -30,14 +39,7 @@ export class Agritaire {
     this.render();
   }
 
-  private currentSelection(): string | null {
-    if (this.selectedId && this.state.hand.some((c) => c.id === this.selectedId)) {
-      return this.selectedId;
-    }
-    return this.state.hand.find((c) => !isInstant(c))?.id ?? this.state.hand[0]?.id ?? null;
-  }
-
-  private newGame(): void {
+  private restart(): void {
     this.state = newGame(this.seed);
     this.selectedId = null;
     this.render();
@@ -47,59 +49,55 @@ export class Agritaire {
     this.root.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
       const el = target.closest<HTMLElement>('[data-action]');
-      if (!el || el.dataset.action === 'noop') return;
+      if (!el) return;
+      if (el instanceof HTMLButtonElement && el.disabled) return;
 
       const action = el.dataset.action!;
-      const colIndex = el.dataset.col !== undefined ? Number(el.dataset.col) : -1;
-      const id = el.dataset.id ?? el.dataset.cardId ?? undefined;
+      const id = el.dataset.id;
 
       switch (action) {
         case 'select':
-          if (id) this.selectedId = id;
-          break;
-        case 'expansion': {
           if (!id) break;
-          if (playExpansion(this.state, id)) this.selectedId = null;
-          else this.selectedId = id;
+          if (this.selectedId === id) {
+            if (sendToField(this.state, id)) developAfterMove(this.state);
+            this.selectedId = null;
+            break;
+          }
+          if (this.selectedId && sendToField(this.state, this.selectedId)) {
+            developAfterMove(this.state);
+            this.selectedId = null;
+            break;
+          }
+          this.selectedId = id;
+          break;
+        case 'drop': {
+          const dest = destFromEl(el);
+          if (dest && this.selectedId && moveCards(this.state, this.selectedId, dest)) {
+            developAfterMove(this.state);
+            this.selectedId = null;
+          }
           break;
         }
-        case 'boom':
-          if (id) this.selectedId = id;
-          break;
-        case 'boom-grain': {
-          const sel = this.currentSelection();
-          if (sel && playBoom(this.state, sel, 'grain')) this.selectedId = null;
-          break;
-        }
-        case 'boom-cow': {
-          const sel = this.currentSelection();
-          if (sel && playBoom(this.state, sel, 'cow')) this.selectedId = null;
-          break;
-        }
-        case 'place': {
-          const sel = this.currentSelection();
-          if (sel && placeFromHand(this.state, sel, colIndex)) this.selectedId = null;
-          break;
-        }
-        case 'sell': {
-          const sel = this.currentSelection();
-          if (sel) sellCard(this.state, sel);
+        case 'draw':
+          drawFromStock(this.state);
+          developAfterMove(this.state);
           this.selectedId = null;
           break;
-        }
-        case 'draw-mini':
-        case 'loan':
-          drawMiniDeck(this.state);
+        case 'resolve':
+          if (id && resolveEvent(this.state, id)) developAfterMove(this.state);
           this.selectedId = null;
           break;
-        case 'fold-grain':
-          foldColumn(this.state, colIndex, 'grain' as FoldMode);
+        case 'fertilize':
+          if (fertilize(this.state)) developAfterMove(this.state);
+          this.selectedId = null;
           break;
-        case 'fold-cattle':
-          foldColumn(this.state, colIndex, 'cattle' as FoldMode);
+        case 'auto':
+          autoPlayFields(this.state);
+          developAfterMove(this.state);
+          this.selectedId = null;
           break;
         case 'new':
-          this.newGame();
+          this.restart();
           return;
       }
       this.render();
@@ -107,9 +105,9 @@ export class Agritaire {
   }
 
   private render(): void {
-    const model: RenderModel = { state: this.state, selectedId: this.currentSelection() };
+    const model: RenderModel = { state: this.state, selectedId: this.selectedId };
     let html = boardHTML(model);
-    if (this.state.over) html += overOverlayHTML(this.state);
+    if (isWon(this.state)) html += overOverlayHTML(this.state);
     this.root.innerHTML = html;
   }
 }
