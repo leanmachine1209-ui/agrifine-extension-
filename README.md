@@ -68,6 +68,17 @@ npm run build    # type-check + production build to dist/
 npm run preview  # serve the production build
 ```
 
+## Deploy (Render)
+
+`render.yaml` defines a static-site blueprint. On Render, create a new **Blueprint**
+from this repo (or a **Static Site** manually) with:
+
+- **Build command:** `npm ci && npm run build`
+- **Publish directory:** `dist`
+
+Render builds the Vite bundle and serves `dist/`, so the deployed URL plays the same
+game as `npm run dev`. `?seed=N` works on the hosted URL too.
+
 ## Project layout
 
 ```
