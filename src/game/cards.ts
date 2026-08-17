@@ -3,7 +3,7 @@
 // Four suits:
 //   🐄 livestock  — folds into cattle (points, but need grain to preserve)
 //   🌾 grain      — folds into the grain bank (grain preserves cattle)
-//   🟩 field      — the sequential backbone; scores bonus points
+//   🏞️ field     — the sequential backbone; scores bonus points
 //   ⭐ wild       — a wildcard that fills any slot in a sequential run
 
 export type Suit = 'livestock' | 'grain' | 'field' | 'wild';
@@ -18,7 +18,7 @@ export interface SuitInfo {
 export const SUIT_INFO: Record<Suit, SuitInfo> = {
   livestock: { suit: 'livestock', emoji: '🐄', label: 'Livestock', color: 'livestock' },
   grain: { suit: 'grain', emoji: '🌾', label: 'Grain', color: 'grain' },
-  field: { suit: 'field', emoji: '🟩', label: 'Field', color: 'field' },
+  field: { suit: 'field', emoji: '🏞️', label: 'Field', color: 'field' },
   wild: { suit: 'wild', emoji: '⭐', label: 'Wild', color: 'wild' },
 };
 

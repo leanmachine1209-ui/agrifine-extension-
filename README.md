@@ -11,7 +11,7 @@ A **turn-based**, sequential stacking game. Four suits:
 
 - 🐄 **Livestock** — folds into cattle (points, but cattle need grain to survive)
 - 🌾 **Grain** — folds into the grain bank (grain preserves cattle)
-- 🟩 **Field** — the very sequential backbone; adds bonus points
+- 🏞️ **Field** — the very sequential backbone; adds bonus points
 - ⭐ **Wildcard** — fills any slot in a run
 
 ### Seeds, seasons & operating loans
