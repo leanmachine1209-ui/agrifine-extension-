@@ -1,43 +1,64 @@
 # 🌱 AGRITAIRE
 
-A farming-simulator twist on **solitaire**. Plant a production chain, watch the
-season's temperature, and keep a living herd fed. Mobile-first web game built with
-**Vite + TypeScript** (no engine, DOM-rendered).
+A farming-simulator twist on **solitaire**. Stack vertically aligned suits,
+collapse them into bigger barns and tractors, and keep crops or cattle paying
+the bills. Mobile-first web game built with **Vite + TypeScript** (no engine,
+DOM-rendered).
 
 ## Gameplay
 
-Cards arrive in **mini-decks of 5** — one season's hand. Place them as a
-**production chain**, fire a wildcard, or **sell** them for seeds.
+Cards arrive in **mini-decks of 5** — one season's hand. Place them on their
+**suit column**, fire a wildcard, or **sell** them for seeds.
 
-### Card classes (~45-card deck)
+### Vertically aligned suits
 
-| Class | Count | Role |
+The board is four columns, one per suit. Cards stack top-to-bottom like a
+tableau pile. Expansion adds an extra column that locks to the first suit you
+play on it.
+
+| Column | Suit | Role |
 | --- | --- | --- |
-| 🏞️ **Field** | 10 | Starts a row |
-| 🌱 **Seed** | 12 (3 per season) | Second step; **must match the current season** |
-| 🚜 **Equipment** | 8 | Third step; the row becomes foldable |
-| 🐄 **Livestock** | 8 | Extra on a completed chain (boosts a cattle fold), or sold |
-| 📐 **Expansion** | 3 | Instant: add a row (cap 6) |
-| 💥 **Boom** | 4 | Instant: pick **+1d6 grain** or **+1 cow** |
+| 🏚️ **Barns** | Field | Capital. Holds cattle. |
+| 🌱 **Crops** | Seed | Production. Season-gated. Harvest for grain. |
+| 🚜 **Tractors** | Equipment | Capital. Lifts harvest yield. |
+| 🐄 **Cattle** | Livestock | Production. Fold into the Pasture. |
+
+📐 **Expansion** and 💥 **Boom** stay instant (add a column, or pick grain / a cow).
+
+### Stacks collapse into bigger assets
+
+Three of the **same tier** in a column collapse into the next asset. That is
+how you level up how much you can manage:
+
+| Suit | Tier 1 | 3× → Tier 2 | 3× → Tier 3 |
+| --- | --- | --- | --- |
+| Barns | Wood barn | Steel barn | Modern barn |
+| Tractors | Compact | Utility | Combine |
+| Crops | Seedling | Standing crop | Bumper crop |
+| Cattle | Cow | Herd | Feedlot |
+
+- **Bigger barns** hold more cattle (wood +1, steel +3, modern +6, on top of a
+  base of 2).
+- **Bigger tractors** add that much extra grain when you harvest.
+
+### Idle token burn
+
+Barns and tractors are capital: they **burn 🌱 tokens** every operating loan
+(wood/compact 1, steel/utility 2, modern/combine 4).
+
+If **no cattle** are paying for the barns, barn burn **doubles**. If **no crops
+or grain** are paying for the tractors, tractor burn **doubles**. Overbuilding
+without production is how farms go bankrupt.
 
 ### Temperature
 
 Current season is **Spring → Summer → Fall → Winter**, cycling each time you
 draw a mini-deck. Wrong-season Seeds cannot be planted — sell them instead.
 
-### Production chain
-
-Empty row → **Field** → **Seed** (matching season) → **Equipment**. Completing
-Equipment makes the row foldable. Livestock may sit on a completed chain as a
-bonus before you fold; they are not a fourth required step.
-
-- 🌾 **Harvest** → Grain Bank (plus a couple of seeds)
-- 🐄 **Cattle** → live animals in the Pasture (livestock extras add more cows)
-
 ### Seeds, seasons & operating loans
 
-- The **first mini-deck is free**. Each later one is an **operating loan** paid
-  in **🌱 seeds** (−2). You start with 5 seeds.
+- The **first mini-deck is free**. Each later one costs **2 seeds plus capital
+  burn**. You start with 5 seeds.
 - When your hand empties: if the **deck is empty you're done**; if you **can't
   afford the next loan you go bankrupt**.
 - **Sell** a card for seeds (+1, Expansion/Boom +2). Harvesting also returns seeds.
@@ -46,16 +67,19 @@ bonus before you fold; they are not a fourth required step.
 
 Every new season each animal **eats 1 grain**. Unfed animals **starve** (those
 furthest from payoff first). Animals **age**, and at the end of their 3-season
-life they **cash out** (+8). Survivors are sold for a bonus when the deck runs out.
+life they **cash out** (+8). Herd size is capped by barn capacity. Survivors
+are sold for a bonus when the deck runs out.
 
 ### Controls (touch + mouse)
 
-- **Tap a held card**, then **tap a row** to plant it (legal rows glow green).
-- **Tap Expansion** to add a field. **Tap Boom**, then pick grain or a cow.
+- **Tap a held card**, then **tap its suit column** to stack it (legal columns
+  glow green). Three of a kind collapse automatically.
+- **Tap Expansion** to add a column. **Tap Boom**, then pick grain or a cow.
 - **💰 Sell** converts the selected card into seeds.
-- When the hand is empty, **🌱 Take Loan** draws the next season's mini-deck and
-  feeds/ages the herd.
-- **🌾 Harvest / 🐄 Cattle** fold a completed chain. **🌱 New Farm** reshuffles.
+- When the hand is empty, **🌱 Take Loan** draws the next season's mini-deck,
+  charges upkeep, and feeds/ages the herd.
+- **🌾 Harvest** folds the crop column. **🐄 Cattle** folds livestock into the
+  pasture. **🌱 New Farm** reshuffles.
 - Add `?seed=N` to the URL for a reproducible (shareable) deal.
 
 ## Development
@@ -84,11 +108,11 @@ game as `npm run dev`. `?seed=N` works on the hosted URL too.
 ```
 src/
   game/
-    cards.ts        # classes, seasons, deck, seeded shuffle
-    rules.ts        # production chain, instants, loans, living herd
+    cards.ts        # suits, asset tiers, seasons, deck, seeded shuffle
+    rules.ts        # vertical stacks, collapse, capacity, idle burn, herd
     rules.test.ts   # unit tests for the engine
   ui/
     render.ts       # HTML builders for the board
   main.ts           # controller: taps, instants, loans
-  style.css         # cardboard tabletop + sloped fields panel
+  style.css         # cardboard tabletop + vertical suit columns
 ```

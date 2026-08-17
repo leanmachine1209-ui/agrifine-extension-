@@ -6,7 +6,7 @@ import {
   placeFromHand,
   sellCard,
   drawMiniDeck,
-  foldRow,
+  foldColumn,
   playExpansion,
   playBoom,
 } from './game/rules';
@@ -50,7 +50,7 @@ export class Agritaire {
       if (!el || el.dataset.action === 'noop') return;
 
       const action = el.dataset.action!;
-      const rowIndex = el.dataset.row !== undefined ? Number(el.dataset.row) : -1;
+      const colIndex = el.dataset.col !== undefined ? Number(el.dataset.col) : -1;
       const id = el.dataset.id ?? el.dataset.cardId ?? undefined;
 
       switch (action) {
@@ -78,7 +78,7 @@ export class Agritaire {
         }
         case 'place': {
           const sel = this.currentSelection();
-          if (sel && placeFromHand(this.state, sel, rowIndex)) this.selectedId = null;
+          if (sel && placeFromHand(this.state, sel, colIndex)) this.selectedId = null;
           break;
         }
         case 'sell': {
@@ -93,10 +93,10 @@ export class Agritaire {
           this.selectedId = null;
           break;
         case 'fold-grain':
-          foldRow(this.state, rowIndex, 'grain' as FoldMode);
+          foldColumn(this.state, colIndex, 'grain' as FoldMode);
           break;
         case 'fold-cattle':
-          foldRow(this.state, rowIndex, 'cattle' as FoldMode);
+          foldColumn(this.state, colIndex, 'cattle' as FoldMode);
           break;
         case 'new':
           this.newGame();

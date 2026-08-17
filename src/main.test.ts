@@ -20,6 +20,8 @@ const FIELD_SEED_DEAL = findSeed((s) => {
   return field && seed;
 });
 
+const THREE_BARNS_DEAL = findSeed((s) => s.hand.filter((c) => c.suit === 'field').length >= 3);
+
 const BOOM_DEAL = findSeed((s) => s.hand.some((c) => c.suit === 'boom'));
 const EXPANSION_DEAL = findSeed((s) => s.hand.some((c) => c.suit === 'expansion'));
 
@@ -30,7 +32,7 @@ describe('AGRITAIRE UI wiring', () => {
     root = document.getElementById('app')!;
   });
 
-  it('renders the season temperature gauge, grain bank, empty pasture, and 4 rows', () => {
+  it('renders the season gauge, grain bank, empty pasture, and 4 vertical suit columns', () => {
     new Agritaire(root, 3);
     expect(root.querySelector('.brand')?.textContent).toContain('AGRITAIRE');
     expect(root.querySelector('.season-gauge')?.getAttribute('data-season')).toBe('spring');
@@ -38,33 +40,52 @@ describe('AGRITAIRE UI wiring', () => {
     expect(root.querySelector('.stat--seed b')?.textContent).toBe('5');
     expect(root.querySelector('.bank-value')?.textContent).toContain('0');
     expect(root.querySelector('.pasture-empty')).toBeTruthy();
+    expect(root.querySelector('[data-upkeep]')?.textContent).toMatch(/No capital upkeep/);
     expect(root.querySelectorAll('[data-hand] .card')).toHaveLength(5);
-    expect(root.querySelectorAll('.row')).toHaveLength(4);
+    expect(root.querySelectorAll('.suit-col')).toHaveLength(4);
+    expect(root.querySelector('.suit-col--field')?.textContent).toMatch(/Barns/);
+    expect(root.querySelector('.suit-col--equipment')?.textContent).toMatch(/Tractors/);
   });
 
   it('selecting a held card highlights it', () => {
     new Agritaire(root, 3);
     const second = root.querySelectorAll('[data-hand] .card')[1];
     click(second);
-    expect(second.classList.contains('is-selected') || root.querySelector('[data-hand] .card.is-selected')).toBeTruthy();
     expect(root.querySelector('[data-hand] .card.is-selected')).toBeTruthy();
   });
 
-  it('places Field then a matching-season Seed on a row', () => {
+  it('places a Field on Barns and a matching-season Seed on Crops', () => {
     new Agritaire(root, FIELD_SEED_DEAL);
     const field = [...root.querySelectorAll('[data-hand] .card')].find((el) =>
       el.classList.contains('card--field'),
     );
     click(field);
-    click(root.querySelector('.row[data-row="0"]'));
-    expect(root.querySelector('.row[data-row="0"] .row-cards .card--field')).toBeTruthy();
+    click(root.querySelector('.suit-col[data-col="0"]'));
+    expect(root.querySelector('.suit-col[data-col="0"] .suit-stack .card--field')).toBeTruthy();
     const seed = [...root.querySelectorAll('[data-hand] .card')].find((el) =>
       el.classList.contains('card--seed'),
     );
     click(seed);
-    click(root.querySelector('.row[data-row="0"]'));
-    expect(root.querySelectorAll('.row[data-row="0"] .row-cards .card')).toHaveLength(2);
-    expect(root.querySelector('.row[data-row="0"]')?.textContent).toMatch(/Equipment/);
+    click(root.querySelector('.suit-col[data-col="1"]'));
+    expect(root.querySelector('.suit-col[data-col="1"] .suit-stack .card--seed')).toBeTruthy();
+    expect(root.querySelector('[data-action="fold-grain"]')).toBeTruthy();
+  });
+
+  it('collapses three wood barns into a steel barn', () => {
+    new Agritaire(root, THREE_BARNS_DEAL);
+    const barnCol = () => root.querySelector('.suit-col[data-col="0"]');
+    for (let i = 0; i < 3; i++) {
+      const field = [...root.querySelectorAll('[data-hand] .card')].find((el) =>
+        el.classList.contains('card--field'),
+      );
+      click(field);
+      click(barnCol());
+    }
+    const stacked = barnCol()?.querySelectorAll('.suit-stack .card') ?? [];
+    expect(stacked.length).toBe(1);
+    expect(stacked[0].classList.contains('card--tier-2')).toBe(true);
+    expect(stacked[0].getAttribute('aria-label')).toBe('Steel barn');
+    expect(root.querySelector('[data-upkeep]')?.textContent).toMatch(/idle barns/);
   });
 
   it('shows Boom grain/cow buttons and Expansion instant action', () => {
@@ -80,9 +101,9 @@ describe('AGRITAIRE UI wiring', () => {
     root = document.getElementById('app')!;
     new Agritaire(root, EXPANSION_DEAL);
     expect(root.querySelector('[data-action="expansion"]')).toBeTruthy();
-    const before = root.querySelectorAll('.row').length;
+    const before = root.querySelectorAll('.suit-col').length;
     click(root.querySelector('[data-action="expansion"]'));
-    expect(root.querySelectorAll('.row').length).toBe(before + 1);
+    expect(root.querySelectorAll('.suit-col').length).toBe(before + 1);
   });
 
   it('selling a card raises seeds and shrinks the hand', () => {
