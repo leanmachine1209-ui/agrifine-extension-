@@ -1,190 +1,186 @@
 import { describe, it, expect } from 'vitest';
-import {
-  Card,
-  Suit,
-  createDeck,
-  shuffle,
-  mulberry32,
-} from './cards';
+import { Card, Suit, createDeck, shuffle, mulberry32 } from './cards';
 import {
   GameState,
-  deal,
+  Row,
+  ROW_COUNT,
+  SPOIL_LIMIT,
   newGame,
-  emptyFoundations,
-  canPlaceOnFoundation,
-  canStackOnTableau,
-  attemptMove,
-  drawFromStock,
-  sendToFoundation,
-  autoHarvest,
-  isWon,
-  farmGrowth,
-  cropsHarvested,
-  COINS_PER_HARVEST,
-  COINS_SILO_BONUS,
+  capacity,
+  effectiveTop,
+  canPlace,
+  anyValidPlacement,
+  placeHand,
+  discardHand,
+  canFold,
+  foldRow,
+  cardsRemaining,
 } from './rules';
 
-function card(suit: Suit, rank: number, faceUp = true): Card {
-  return { id: `${suit}-${rank}`, suit, rank, faceUp };
+function c(suit: Suit, rank: number): Card {
+  return { id: suit === 'wild' ? `wild-${rank}` : `${suit}-${rank}`, suit, rank: suit === 'wild' ? 0 : rank };
 }
-
+function row(cards: Card[]): Row {
+  return { cards, base: cards.length ? (cards[0].suit === 'wild' ? 1 : cards[0].rank) : 0 };
+}
 function baseState(overrides: Partial<GameState> = {}): GameState {
   return {
-    stock: [],
-    waste: [],
-    foundations: emptyFoundations(),
-    tableau: Array.from({ length: 7 }, () => []),
-    stats: { moves: 0, score: 0, coins: 0 },
+    deck: [],
+    hand: null,
+    rows: Array.from({ length: ROW_COUNT }, () => ({ cards: [], base: 0 })),
+    grain: 0,
+    herd: 0,
+    score: 0,
+    spoiled: 0,
+    cattleLost: 0,
+    turn: 1,
+    over: false,
+    failed: false,
     ...overrides,
   };
 }
 
 describe('deck', () => {
-  it('creates 52 unique cards, 13 per suit', () => {
+  it('has 39 ranked cards + 6 wilds', () => {
     const deck = createDeck();
-    expect(deck).toHaveLength(52);
-    expect(new Set(deck.map((c) => c.id)).size).toBe(52);
-    for (const suit of ['corn', 'wheat', 'tomato', 'carrot'] as Suit[]) {
-      expect(deck.filter((c) => c.suit === suit)).toHaveLength(13);
+    expect(deck).toHaveLength(45);
+    expect(new Set(deck.map((x) => x.id)).size).toBe(45);
+    for (const s of ['livestock', 'grain', 'field'] as Suit[]) {
+      expect(deck.filter((x) => x.suit === s)).toHaveLength(13);
     }
+    expect(deck.filter((x) => x.suit === 'wild')).toHaveLength(6);
   });
 
-  it('shuffle is a permutation and is seed-reproducible', () => {
-    const a = shuffle(createDeck(), mulberry32(42)).map((c) => c.id);
-    const b = shuffle(createDeck(), mulberry32(42)).map((c) => c.id);
+  it('seeded shuffle is reproducible', () => {
+    const a = shuffle(createDeck(), mulberry32(5)).map((x) => x.id);
+    const b = shuffle(createDeck(), mulberry32(5)).map((x) => x.id);
     expect(a).toEqual(b);
-    expect(new Set(a).size).toBe(52);
   });
 });
 
-describe('deal', () => {
-  it('lays out 7 tableau piles with only the top card face up', () => {
-    const state = deal(createDeck());
-    for (let i = 0; i < 7; i++) {
-      expect(state.tableau[i]).toHaveLength(i + 1);
-      const pile = state.tableau[i];
-      expect(pile[pile.length - 1].faceUp).toBe(true);
-      expect(pile.slice(0, -1).every((c) => !c.faceUp)).toBe(true);
-    }
-    expect(state.stock).toHaveLength(52 - 28);
-    expect(state.stock.every((c) => !c.faceUp)).toBe(true);
-    expect(state.waste).toHaveLength(0);
-  });
-
-  it('newGame with a seed is reproducible', () => {
-    const s1 = newGame(7);
-    const s2 = newGame(7);
-    expect(s1.tableau.map((p) => p.map((c) => c.id))).toEqual(
-      s2.tableau.map((p) => p.map((c) => c.id)),
-    );
+describe('newGame', () => {
+  it('draws a hand and leaves the rest in the deck', () => {
+    const s = newGame(3);
+    expect(s.hand).not.toBeNull();
+    expect(s.deck).toHaveLength(44);
+    expect(cardsRemaining(s)).toBe(45);
+    expect(s.rows).toHaveLength(4);
+    expect(s.rows.every((r) => r.cards.length === 0)).toBe(true);
   });
 });
 
-describe('foundation rules', () => {
-  it('empty silo accepts only a seed (Ace)', () => {
-    expect(canPlaceOnFoundation(card('corn', 1), [])).toBe(true);
-    expect(canPlaceOnFoundation(card('corn', 2), [])).toBe(false);
-  });
-  it('builds up by same suit', () => {
-    const f = [card('corn', 1)];
-    expect(canPlaceOnFoundation(card('corn', 2), f)).toBe(true);
-    expect(canPlaceOnFoundation(card('wheat', 2), f)).toBe(false);
-    expect(canPlaceOnFoundation(card('corn', 3), f)).toBe(false);
+describe('capacity', () => {
+  it('is base plus grain/GRAIN_PER_CATTLE', () => {
+    expect(capacity(baseState({ grain: 0 }))).toBe(2);
+    expect(capacity(baseState({ grain: 4 }))).toBe(4);
+    expect(capacity(baseState({ grain: 5 }))).toBe(4);
+    expect(capacity(baseState({ grain: 6 }))).toBe(5);
   });
 });
 
-describe('tableau rules', () => {
-  it('empty plot accepts only a King', () => {
-    expect(canStackOnTableau(card('corn', 13), undefined)).toBe(true);
-    expect(canStackOnTableau(card('corn', 12), undefined)).toBe(false);
+describe('placement rules', () => {
+  it('empty row accepts anything; runs must ascend by 1', () => {
+    expect(canPlace(c('field', 7), row([]))).toBe(true);
+    const r = row([c('field', 5)]);
+    expect(effectiveTop(r)).toBe(5);
+    expect(canPlace(c('grain', 6), r)).toBe(true);
+    expect(canPlace(c('grain', 7), r)).toBe(false);
   });
-  it('stacks descending in alternating colors', () => {
-    // corn/wheat = gold, tomato/carrot = red
-    expect(canStackOnTableau(card('tomato', 6), card('corn', 7))).toBe(true); // red on gold
-    expect(canStackOnTableau(card('wheat', 6), card('corn', 7))).toBe(false); // gold on gold
-    expect(canStackOnTableau(card('tomato', 7), card('corn', 7))).toBe(false); // wrong rank
+
+  it('wild fills any next slot', () => {
+    const r = row([c('field', 5)]);
+    expect(canPlace(c('wild', 0), r)).toBe(true);
   });
 });
 
-describe('attemptMove', () => {
-  it('moves a waste seed into its silo and awards coins', () => {
-    const state = baseState({ waste: [card('corn', 1)] });
-    const ok = attemptMove(state, 'corn-1', { type: 'foundation', suit: 'corn' });
-    expect(ok).toBe(true);
-    expect(state.foundations.corn).toHaveLength(1);
-    expect(state.waste).toHaveLength(0);
-    expect(state.stats.coins).toBe(COINS_PER_HARVEST);
-    expect(state.stats.moves).toBe(1);
+describe('turn flow', () => {
+  it('places the hand, advances the run, and draws the next card', () => {
+    const s = baseState({ hand: c('grain', 6), deck: [c('field', 1)] });
+    s.rows[0] = row([c('field', 5)]);
+    expect(placeHand(s, 0)).toBe(true);
+    expect(s.rows[0].cards.map((x) => x.id)).toEqual(['field-5', 'grain-6']);
+    expect(s.hand?.id).toBe('field-1'); // next card drawn
+    expect(s.deck).toHaveLength(0);
+    expect(s.turn).toBe(2);
   });
 
-  it('rejects an illegal tableau stack', () => {
-    const state = baseState();
-    state.tableau[0] = [card('corn', 7)];
-    state.tableau[1] = [card('wheat', 6)]; // same color, illegal
-    expect(attemptMove(state, 'wheat-6', { type: 'tableau', index: 0 })).toBe(false);
+  it('rejects an illegal placement', () => {
+    const s = baseState({ hand: c('grain', 8) });
+    s.rows[0] = row([c('field', 5)]);
+    expect(placeHand(s, 0)).toBe(false);
+    expect(s.hand?.id).toBe('grain-8'); // unchanged
   });
 
-  it('moves a valid multi-card run and flips the exposed card', () => {
-    const state = baseState();
-    state.tableau[0] = [card('carrot', 5, false), card('corn', 8), card('tomato', 7)];
-    state.tableau[1] = [card('carrot', 9)];
-    // move corn-8 + tomato-7 (gold,red run) onto carrot-9 (red) -> corn-8 red? corn=gold on carrot=red ok
-    const ok = attemptMove(state, 'corn-8', { type: 'tableau', index: 1 });
-    expect(ok).toBe(true);
-    expect(state.tableau[1].map((c) => c.id)).toEqual(['carrot-9', 'corn-8', 'tomato-7']);
-    // exposed carrot-5 should now be face up
-    expect(state.tableau[0]).toHaveLength(1);
-    expect(state.tableau[0][0].faceUp).toBe(true);
+  it('a wild can start a row at rank 1 and be extended by rank 2', () => {
+    const s = baseState({ hand: c('wild', 1), deck: [c('field', 2)] });
+    placeHand(s, 0); // wild starts row, base 1
+    expect(s.rows[0].base).toBe(1);
+    expect(placeHand(s, 0)).toBe(true); // field-2 continues
+    expect(s.rows[0].cards.map((x) => x.suit)).toEqual(['wild', 'field']);
+  });
+
+  it('discarding spoils the hand and draws the next', () => {
+    const s = baseState({ hand: c('grain', 1), deck: [c('field', 1)] });
+    expect(discardHand(s)).toBe(true);
+    expect(s.spoiled).toBe(1);
+    expect(s.hand?.id).toBe('field-1');
+  });
+
+  it('too many spoils fails the farm', () => {
+    const s = baseState({ hand: c('grain', 1), deck: [c('field', 1)], spoiled: SPOIL_LIMIT - 1 });
+    discardHand(s);
+    expect(s.spoiled).toBe(SPOIL_LIMIT);
+    expect(s.over).toBe(true);
+    expect(s.failed).toBe(true);
+  });
+
+  it('detects stuck hands with no placement and nothing foldable', () => {
+    const s = baseState({ hand: c('grain', 9) });
+    s.rows.forEach((_, i) => (s.rows[i] = row([c('field', 3)]))); // top 3, need 4; len 1 not foldable
+    expect(anyValidPlacement(s)).toBe(false);
+    // grain-9 fits nowhere (tops are 3, need 4); no row foldable
+    expect(placeHand(s, 0)).toBe(false);
   });
 });
 
-describe('stock', () => {
-  it('draws to waste then recycles when empty', () => {
-    const state = baseState({ stock: [card('corn', 3, false), card('wheat', 4, false)] });
-    expect(drawFromStock(state)).toBe(true);
-    expect(state.waste).toHaveLength(1);
-    expect(state.waste[0].faceUp).toBe(true);
-    drawFromStock(state);
-    expect(state.stock).toHaveLength(0);
-    expect(state.waste).toHaveLength(2);
-    // recycle
-    expect(drawFromStock(state)).toBe(true);
-    expect(state.stock).toHaveLength(2);
-    expect(state.waste).toHaveLength(0);
-    expect(state.stock.every((c) => !c.faceUp)).toBe(true);
+describe('folding', () => {
+  it('needs at least MIN_RUN cards', () => {
+    expect(canFold(row([c('grain', 1), c('grain', 2)]))).toBe(false);
+    expect(canFold(row([c('grain', 1), c('grain', 2), c('field', 3)]))).toBe(true);
+  });
+
+  it('harvest adds grain (+grain-card bonus) and points (+field bonus)', () => {
+    const s = baseState();
+    s.rows[0] = row([c('grain', 3), c('grain', 4), c('field', 5)]);
+    expect(foldRow(s, 0, 'grain')).toBe(true);
+    expect(s.grain).toBe(3 + 2); // len 3 + 2 grain cards
+    expect(s.score).toBe(3 + 1); // len 3 + 1 field card
+    expect(s.rows[0].cards).toHaveLength(0);
+  });
+
+  it('cattle is capped by preservation capacity; grain raises the cap', () => {
+    const s = baseState({ grain: 0, herd: 0 });
+    s.rows[0] = row([c('livestock', 3), c('field', 4), c('grain', 5)]);
+    // want = len 3 + 1 livestock = 4; capacity = 2 -> only 2 preserved
+    expect(foldRow(s, 0, 'cattle')).toBe(true);
+    expect(s.herd).toBe(2);
+    expect(s.cattleLost).toBe(2);
+    expect(s.score).toBe(2 * 2 + 1); // 2 cattle *2 + 1 field bonus
+
+    // Harvest grain to raise capacity, then bank more cattle.
+    s.grain = 6; // capacity 2 + 3 = 5
+    s.rows[1] = row([c('livestock', 6), c('livestock', 7), c('livestock', 8)]);
+    foldRow(s, 1, 'cattle'); // want 3 + 3 = 6, room = 5 - 2 = 3
+    expect(s.herd).toBe(5);
   });
 });
 
-describe('harvest + win', () => {
-  it('sendToFoundation routes a card to its silo', () => {
-    const state = baseState();
-    state.foundations.corn = [card('corn', 1)];
-    state.tableau[3] = [card('corn', 2)];
-    expect(sendToFoundation(state, 'corn-2')).toBe(true);
-    expect(state.foundations.corn.map((c) => c.rank)).toEqual([1, 2]);
-  });
-
-  it('autoHarvest completes silos, pays the bonus, and wins', () => {
-    const state = baseState();
-    const suits: Suit[] = ['corn', 'wheat', 'tomato', 'carrot'];
-    // Each silo pre-filled A..Q; the four Kings are reachable on tableau tops.
-    suits.forEach((s, i) => {
-      state.foundations[s] = Array.from({ length: 12 }, (_, r) => card(s, r + 1));
-      state.tableau[i] = [card(s, 13)];
-    });
-    expect(isWon(state)).toBe(false);
-    const moved = autoHarvest(state);
-    expect(moved).toBe(4);
-    expect(isWon(state)).toBe(true);
-    expect(cropsHarvested(state)).toBe(4);
-    expect(farmGrowth(state)).toBe(1);
-    // 4 kings * per-harvest + 4 completion bonuses
-    expect(state.stats.coins).toBe(4 * COINS_PER_HARVEST + 4 * COINS_SILO_BONUS);
-  });
-
-  it('farmGrowth reflects fraction of cards in silos', () => {
-    const state = baseState();
-    state.foundations.corn = Array.from({ length: 13 }, (_, r) => card('corn', r + 1));
-    expect(farmGrowth(state)).toBeCloseTo(13 / 52);
+describe('game end', () => {
+  it('awards a herd bonus when the deck runs out', () => {
+    const s = baseState({ hand: c('field', 1), deck: [], herd: 3 });
+    placeHand(s, 0); // consumes hand, deck empty -> game over
+    expect(s.over).toBe(true);
+    expect(s.failed).toBe(false);
+    expect(s.score).toBe(3 * 3); // herd end bonus
   });
 });

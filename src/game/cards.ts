@@ -1,62 +1,57 @@
-// Card + crop model for AGRITAIRE.
-// Solitaire's four suits are reskinned as four crops. The alternating-color
-// rule of Klondike maps onto two crop "families": gold crops and red crops.
+// Card + suit model for AGRITAIRE.
+//
+// Four suits:
+//   🐄 livestock  — folds into cattle (points, but need grain to preserve)
+//   🌾 grain      — folds into the grain bank (grain preserves cattle)
+//   🟩 field      — the sequential backbone; scores bonus points
+//   ⭐ wild       — a wildcard that fills any slot in a sequential run
 
-export type Suit = 'corn' | 'wheat' | 'tomato' | 'carrot';
-export type CropColor = 'gold' | 'red';
+export type Suit = 'livestock' | 'grain' | 'field' | 'wild';
 
-export interface CropInfo {
+export interface SuitInfo {
   readonly suit: Suit;
   readonly emoji: string;
   readonly label: string;
-  readonly color: CropColor;
+  readonly color: string; // css class suffix
 }
 
-export const CROPS: Record<Suit, CropInfo> = {
-  corn: { suit: 'corn', emoji: '🌽', label: 'Corn', color: 'gold' },
-  wheat: { suit: 'wheat', emoji: '🌾', label: 'Wheat', color: 'gold' },
-  tomato: { suit: 'tomato', emoji: '🍅', label: 'Tomato', color: 'red' },
-  carrot: { suit: 'carrot', emoji: '🥕', label: 'Carrot', color: 'red' },
+export const SUIT_INFO: Record<Suit, SuitInfo> = {
+  livestock: { suit: 'livestock', emoji: '🐄', label: 'Livestock', color: 'livestock' },
+  grain: { suit: 'grain', emoji: '🌾', label: 'Grain', color: 'grain' },
+  field: { suit: 'field', emoji: '🟩', label: 'Field', color: 'field' },
+  wild: { suit: 'wild', emoji: '⭐', label: 'Wild', color: 'wild' },
 };
 
-export const SUITS: Suit[] = ['corn', 'wheat', 'tomato', 'carrot'];
-
-export const RANK_MIN = 1; // Ace = a freshly planted seed
-export const RANK_MAX = 13; // King = fully grown, ready to harvest
+/** Ranked suits form the 1..13 sequences; wild is rankless. */
+export const RANKED_SUITS: Suit[] = ['livestock', 'grain', 'field'];
+export const RANK_MIN = 1;
+export const RANK_MAX = 13;
+export const WILD_COUNT = 6;
 
 export interface Card {
   readonly id: string;
   readonly suit: Suit;
-  readonly rank: number; // 1..13
-  faceUp: boolean;
+  readonly rank: number; // 1..13 for ranked suits; 0 for wild
 }
 
-export function cropColor(suit: Suit): CropColor {
-  return CROPS[suit].color;
+export function isWild(card: Card): boolean {
+  return card.suit === 'wild';
 }
 
-export function rankLabel(rank: number): string {
-  switch (rank) {
-    case 1:
-      return 'A';
-    case 11:
-      return 'J';
-    case 12:
-      return 'Q';
-    case 13:
-      return 'K';
-    default:
-      return String(rank);
-  }
+export function rankLabel(card: Card): string {
+  return card.suit === 'wild' ? '★' : String(card.rank);
 }
 
-/** Create an ordered, face-down 52-card deck. */
+/** Build the ordered deck: 3 ranked suits × 13 + WILD_COUNT wilds. */
 export function createDeck(): Card[] {
   const deck: Card[] = [];
-  for (const suit of SUITS) {
+  for (const suit of RANKED_SUITS) {
     for (let rank = RANK_MIN; rank <= RANK_MAX; rank++) {
-      deck.push({ id: `${suit}-${rank}`, suit, rank, faceUp: false });
+      deck.push({ id: `${suit}-${rank}`, suit, rank });
     }
+  }
+  for (let i = 1; i <= WILD_COUNT; i++) {
+    deck.push({ id: `wild-${i}`, suit: 'wild', rank: 0 });
   }
   return deck;
 }

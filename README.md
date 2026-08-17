@@ -7,22 +7,39 @@ iOS/Android with Capacitor later.
 
 ## Gameplay
 
-Classic Klondike solitaire, reskinned as a farm:
+A **turn-based**, sequential stacking game. Four suits:
 
-- **Crops are the suits** — 🌽 Corn & 🌾 Wheat (gold) and 🍅 Tomato & 🥕 Carrot (red).
-  Tableau fields build **down** in alternating crop colors.
-- **Silos are the foundations** — plant a seed (Ace) and build **up** by crop to the
-  harvest (King). Completing a silo harvests that crop.
-- **Farm economy** — each card sent to a silo earns 🪙 coins, completing a silo pays
-  a harvest bonus, and the **Farm Growth** panel of plots visibly grows
-  (🟫 → 🌱 → 🌿 → 🌾) as you play. Harvest all four crops to win.
+- 🐄 **Livestock** — folds into cattle (points, but cattle need grain to survive)
+- 🌾 **Grain** — folds into the grain bank (grain preserves cattle)
+- 🟩 **Field** — the very sequential backbone; adds bonus points
+- ⭐ **Wildcard** — fills any slot in a run
+
+### How a turn works
+
+- Each turn you draw **one card** into your hand.
+- Place it on one of the **four rows**. Rows build **strictly ascending consecutive
+  runs** (each card must be exactly one rank higher than the row's top). A ⭐ wild
+  fills any slot.
+- If the card fits nowhere (or you choose), it **spoils** and is lost.
+  Spoil too many (12) and the **farm fails**.
+
+### Folding a set
+
+A row of **3+ cards** can be folded for points:
+
+- 🌾 **Harvest** → banks **grain**. Grain raises how many **cattle** you can keep.
+- 🐄 **Cattle** → banks **cattle** (worth 2× points), but only up to your capacity
+  (`base + grain / 2`). Cattle over capacity can't be preserved.
+
+**Suit bonuses on fold:** grain cards boost harvests, livestock cards boost the herd,
+field cards add bonus points. Surviving cattle pay a bonus when the deck runs out.
 
 ### Controls (touch + mouse)
 
-- **Tap a card** to pick it up, then **tap a silo or field** to place it.
-- **Double-tap** a card to auto-send it to its silo.
-- **Tap the stock** (soil pile) to draw; tap again when empty to recycle.
-- **🚜 Auto-Harvest** sends every reachable card to its silo. **↩︎ Undo** / **🌱 New** as needed.
+- **Tap a row** to place the current card there (valid rows glow green).
+- **🌾 / 🐄** buttons on a foldable row bank it as grain or cattle.
+- **🗑 Discard** loses the current card on purpose. **🌱 New Farm** reshuffles.
+- Add `?seed=N` to the URL for a reproducible (shareable) deal.
 
 ## Development
 
