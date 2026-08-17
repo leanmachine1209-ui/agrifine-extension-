@@ -1,62 +1,61 @@
 # 🌱 AGRITAIRE
 
-A farming-simulator twist on **solitaire**. Plant seeds, build silos, and harvest
-your whole farm. Mobile-first web game built with **Vite + TypeScript** (no engine,
-DOM-rendered), so it runs anywhere Chrome/Safari does and can be wrapped for native
-iOS/Android with Capacitor later.
+A farming-simulator twist on **solitaire**. Plant a production chain, watch the
+season's temperature, and keep a living herd fed. Mobile-first web game built with
+**Vite + TypeScript** (no engine, DOM-rendered).
 
 ## Gameplay
 
-A **turn-based**, sequential stacking game. Four suits:
+Cards arrive in **mini-decks of 5** — one season's hand. Place them as a
+**production chain**, fire a wildcard, or **sell** them for seeds.
 
-- 🐄 **Livestock** — folds into cattle (points, but cattle need grain to survive)
-- 🌾 **Grain** — folds into the grain bank (grain preserves cattle)
-- 🏞️ **Field** — the very sequential backbone; adds bonus points
-- ⭐ **Wildcard** — fills any slot in a run
+### Card classes (~45-card deck)
+
+| Class | Count | Role |
+| --- | --- | --- |
+| 🏞️ **Field** | 10 | Starts a row |
+| 🌱 **Seed** | 12 (3 per season) | Second step; **must match the current season** |
+| 🚜 **Equipment** | 8 | Third step; the row becomes foldable |
+| 🐄 **Livestock** | 8 | Extra on a completed chain (boosts a cattle fold), or sold |
+| 📐 **Expansion** | 3 | Instant: add a row (cap 6) |
+| 💥 **Boom** | 4 | Instant: pick **+1d6 grain** or **+1 cow** |
+
+### Temperature
+
+Current season is **Spring → Summer → Fall → Winter**, cycling each time you
+draw a mini-deck. Wrong-season Seeds cannot be planted — sell them instead.
+
+### Production chain
+
+Empty row → **Field** → **Seed** (matching season) → **Equipment**. Completing
+Equipment makes the row foldable. Livestock may sit on a completed chain as a
+bonus before you fold; they are not a fourth required step.
+
+- 🌾 **Harvest** → Grain Bank (plus a couple of seeds)
+- 🐄 **Cattle** → live animals in the Pasture (livestock extras add more cows)
 
 ### Seeds, seasons & operating loans
 
-- Cards arrive in **mini-decks of 5** — one season's hand. The **first is free**.
-- Each new mini-deck is an **operating loan** paid in **🌱 seeds** (−2). You start
-  with 5 seeds.
-- When your hand empties: if the **deck is empty you're done** (season complete); if
-  you **can't afford the next loan you go bankrupt** — so bank seeds before you run out.
-- **Sell cards** for seeds (+1, wild +2) to fund the next season. Harvesting grain also
-  returns a couple of seeds.
-
-### How you play a hand
-
-- **Place a card** on one of the **four rows**, which build **strictly ascending
-  consecutive runs** (each card exactly one rank higher than the top). A ⭐ wild fills
-  any slot.
-- Or **sell** the card for seeds. Every card is either placed or sold, so the hand
-  always clears and you move to the next season.
-
-### Folding a set
-
-A row of **3+ cards** can be folded:
-
-- 🌾 **Harvest** → fills the **Grain Bank** (and returns some seeds).
-- 🐄 **Cattle** → adds live animals to your **Pasture**.
+- The **first mini-deck is free**. Each later one is an **operating loan** paid
+  in **🌱 seeds** (−2). You start with 5 seeds.
+- When your hand empties: if the **deck is empty you're done**; if you **can't
+  afford the next loan you go bankrupt**.
+- **Sell** a card for seeds (+1, Expansion/Boom +2). Harvesting also returns seeds.
 
 ### The living herd
 
-The Pasture is alive. Every new season each animal **eats grain** from the Grain Bank
-(`1 grain each`). If you can't feed them, animals **starve** (the ones furthest from
-payoff go first). Animals **age**, and when their lifespan (3 seasons) ends they leave
-the board and **cash out for big points** (+8). Any survivors are sold for a bonus when
-the deck runs out. So grain is your feed reserve — harvest enough to keep the herd alive
-until it pays off.
-
-**Suit bonuses on fold:** grain cards boost harvests, livestock cards add more animals,
-field cards add bonus points.
+Every new season each animal **eats 1 grain**. Unfed animals **starve** (those
+furthest from payoff first). Animals **age**, and at the end of their 3-season
+life they **cash out** (+8). Survivors are sold for a bonus when the deck runs out.
 
 ### Controls (touch + mouse)
 
-- **Tap a held card** to select it, then **tap a row** to place it (valid rows glow green).
+- **Tap a held card**, then **tap a row** to plant it (legal rows glow green).
+- **Tap Expansion** to add a field. **Tap Boom**, then pick grain or a cow.
 - **💰 Sell** converts the selected card into seeds.
-- When the hand is empty, **🌱 Take Loan** draws the next season's mini-deck.
-- **🌾 / 🐄** buttons on a foldable run bank it as grain or cattle. **🌱 New Farm** reshuffles.
+- When the hand is empty, **🌱 Take Loan** draws the next season's mini-deck and
+  feeds/ages the herd.
+- **🌾 Harvest / 🐄 Cattle** fold a completed chain. **🌱 New Farm** reshuffles.
 - Add `?seed=N` to the URL for a reproducible (shareable) deal.
 
 ## Development
@@ -64,7 +63,7 @@ field cards add bonus points.
 ```bash
 npm ci          # install dependencies
 npm run dev      # start Vite dev server (http://localhost:5173)
-npm test         # run the rules-engine unit tests (Vitest)
+npm test         # run the rules-engine + UI tests (Vitest)
 npm run build    # type-check + production build to dist/
 npm run preview  # serve the production build
 ```
@@ -74,11 +73,11 @@ npm run preview  # serve the production build
 ```
 src/
   game/
-    cards.ts        # crop/card model, deck, seeded shuffle
-    rules.ts        # pure Klondike engine (moves, validation, economy, win)
+    cards.ts        # classes, seasons, deck, seeded shuffle
+    rules.ts        # production chain, instants, loans, living herd
     rules.test.ts   # unit tests for the engine
   ui/
-    render.ts       # pure HTML builders for the board
-  main.ts           # controller: state, input (tap-to-move), timer, undo
-  style.css         # mobile-first farm theme
+    render.ts       # HTML builders for the board
+  main.ts           # controller: taps, instants, loans
+  style.css         # cardboard tabletop + sloped fields panel
 ```

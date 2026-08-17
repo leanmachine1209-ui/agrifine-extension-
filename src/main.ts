@@ -7,7 +7,10 @@ import {
   sellCard,
   drawMiniDeck,
   foldRow,
+  playExpansion,
+  playBoom,
 } from './game/rules';
+import { isInstant } from './game/cards';
 import { boardHTML, overOverlayHTML, RenderModel } from './ui/render';
 
 export class Agritaire {
@@ -31,7 +34,7 @@ export class Agritaire {
     if (this.selectedId && this.state.hand.some((c) => c.id === this.selectedId)) {
       return this.selectedId;
     }
-    return this.state.hand[0]?.id ?? null;
+    return this.state.hand.find((c) => !isInstant(c))?.id ?? this.state.hand[0]?.id ?? null;
   }
 
   private newGame(): void {
@@ -44,17 +47,35 @@ export class Agritaire {
     this.root.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
       const el = target.closest<HTMLElement>('[data-action]');
-      const handCard = target.closest<HTMLElement>('[data-hand] [data-card-id]');
-      if (handCard && (!el || el.dataset.action !== 'place')) {
-        this.selectedId = handCard.getAttribute('data-card-id');
-        this.render();
-        return;
-      }
-      if (!el) return;
+      if (!el || el.dataset.action === 'noop') return;
 
       const action = el.dataset.action!;
       const rowIndex = el.dataset.row !== undefined ? Number(el.dataset.row) : -1;
+      const id = el.dataset.id ?? el.dataset.cardId ?? undefined;
+
       switch (action) {
+        case 'select':
+          if (id) this.selectedId = id;
+          break;
+        case 'expansion': {
+          if (!id) break;
+          if (playExpansion(this.state, id)) this.selectedId = null;
+          else this.selectedId = id;
+          break;
+        }
+        case 'boom':
+          if (id) this.selectedId = id;
+          break;
+        case 'boom-grain': {
+          const sel = this.currentSelection();
+          if (sel && playBoom(this.state, sel, 'grain')) this.selectedId = null;
+          break;
+        }
+        case 'boom-cow': {
+          const sel = this.currentSelection();
+          if (sel && playBoom(this.state, sel, 'cow')) this.selectedId = null;
+          break;
+        }
         case 'place': {
           const sel = this.currentSelection();
           if (sel && placeFromHand(this.state, sel, rowIndex)) this.selectedId = null;
@@ -67,7 +88,9 @@ export class Agritaire {
           break;
         }
         case 'draw-mini':
+        case 'loan':
           drawMiniDeck(this.state);
+          this.selectedId = null;
           break;
         case 'fold-grain':
           foldRow(this.state, rowIndex, 'grain' as FoldMode);

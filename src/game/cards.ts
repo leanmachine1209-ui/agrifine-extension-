@@ -1,57 +1,85 @@
-// Card + suit model for AGRITAIRE.
+// Card model for AGRITAIRE.
 //
-// Four suits:
-//   🐄 livestock  — folds into cattle (points, but need grain to preserve)
-//   🌾 grain      — folds into the grain bank (grain preserves cattle)
-//   🏞️ field     — the sequential backbone; scores bonus points
-//   ⭐ wild       — a wildcard that fills any slot in a sequential run
+// Classes:
+//   🏞️ field      — starts a production chain
+//   🌱 seed       — second step; must match the current season
+//   🚜 equipment  — third step; row becomes foldable
+//   🐄 livestock  — extra on a completed chain; boosts a cattle fold
+//   📐 expansion  — instant: add a row (cap 6)
+//   💥 boom       — instant: +grain or +cow (player picks)
 
-export type Suit = 'livestock' | 'grain' | 'field' | 'wild';
+export type Suit = 'field' | 'seed' | 'equipment' | 'livestock' | 'expansion' | 'boom';
+export type SeasonName = 'spring' | 'summer' | 'fall' | 'winter';
 
 export interface SuitInfo {
   readonly suit: Suit;
   readonly emoji: string;
   readonly label: string;
-  readonly color: string; // css class suffix
+  readonly color: string;
 }
 
 export const SUIT_INFO: Record<Suit, SuitInfo> = {
-  livestock: { suit: 'livestock', emoji: '🐄', label: 'Livestock', color: 'livestock' },
-  grain: { suit: 'grain', emoji: '🌾', label: 'Grain', color: 'grain' },
   field: { suit: 'field', emoji: '🏞️', label: 'Field', color: 'field' },
-  wild: { suit: 'wild', emoji: '⭐', label: 'Wild', color: 'wild' },
+  seed: { suit: 'seed', emoji: '🌱', label: 'Seed', color: 'seed' },
+  equipment: { suit: 'equipment', emoji: '🚜', label: 'Equipment', color: 'equipment' },
+  livestock: { suit: 'livestock', emoji: '🐄', label: 'Livestock', color: 'livestock' },
+  expansion: { suit: 'expansion', emoji: '📐', label: 'Expansion', color: 'expansion' },
+  boom: { suit: 'boom', emoji: '💥', label: 'Boom', color: 'boom' },
 };
 
-/** Ranked suits form the 1..13 sequences; wild is rankless. */
-export const RANKED_SUITS: Suit[] = ['livestock', 'grain', 'field'];
-export const RANK_MIN = 1;
-export const RANK_MAX = 13;
-export const WILD_COUNT = 6;
+export const SEASONS: SeasonName[] = ['spring', 'summer', 'fall', 'winter'];
+
+export const SEASON_INFO: Record<SeasonName, { emoji: string; label: string }> = {
+  spring: { emoji: '🌸', label: 'Spring' },
+  summer: { emoji: '☀️', label: 'Summer' },
+  fall: { emoji: '🍂', label: 'Fall' },
+  winter: { emoji: '❄️', label: 'Winter' },
+};
+
+export const FIELD_COUNT = 10;
+export const SEEDS_PER_SEASON = 3;
+export const EQUIPMENT_COUNT = 8;
+export const LIVESTOCK_COUNT = 8;
+export const EXPANSION_COUNT = 3;
+export const BOOM_COUNT = 4;
 
 export interface Card {
   readonly id: string;
   readonly suit: Suit;
-  readonly rank: number; // 1..13 for ranked suits; 0 for wild
+  readonly season?: SeasonName; // seeds only
 }
 
-export function isWild(card: Card): boolean {
-  return card.suit === 'wild';
+export function isInstant(card: Card): boolean {
+  return card.suit === 'expansion' || card.suit === 'boom';
 }
 
-export function rankLabel(card: Card): string {
-  return card.suit === 'wild' ? '★' : String(card.rank);
+export function cardLabel(card: Card): string {
+  if (card.suit === 'seed' && card.season) return SEASON_INFO[card.season].emoji;
+  return SUIT_INFO[card.suit].emoji;
 }
 
-/** Build the ordered deck: 3 ranked suits × 13 + WILD_COUNT wilds. */
+/** Build the ordered deck (~45 cards). */
 export function createDeck(): Card[] {
   const deck: Card[] = [];
-  for (const suit of RANKED_SUITS) {
-    for (let rank = RANK_MIN; rank <= RANK_MAX; rank++) {
-      deck.push({ id: `${suit}-${rank}`, suit, rank });
+  for (let i = 1; i <= FIELD_COUNT; i++) {
+    deck.push({ id: `field-${i}`, suit: 'field' });
+  }
+  for (const season of SEASONS) {
+    for (let i = 1; i <= SEEDS_PER_SEASON; i++) {
+      deck.push({ id: `seed-${season}-${i}`, suit: 'seed', season });
     }
   }
-  for (let i = 1; i <= WILD_COUNT; i++) {
-    deck.push({ id: `wild-${i}`, suit: 'wild', rank: 0 });
+  for (let i = 1; i <= EQUIPMENT_COUNT; i++) {
+    deck.push({ id: `equipment-${i}`, suit: 'equipment' });
+  }
+  for (let i = 1; i <= LIVESTOCK_COUNT; i++) {
+    deck.push({ id: `livestock-${i}`, suit: 'livestock' });
+  }
+  for (let i = 1; i <= EXPANSION_COUNT; i++) {
+    deck.push({ id: `expansion-${i}`, suit: 'expansion' });
+  }
+  for (let i = 1; i <= BOOM_COUNT; i++) {
+    deck.push({ id: `boom-${i}`, suit: 'boom' });
   }
   return deck;
 }

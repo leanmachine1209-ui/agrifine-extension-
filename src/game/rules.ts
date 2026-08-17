@@ -1,49 +1,56 @@
-// AGRITAIRE rules engine (v5) — seasons, mini-deck loans & a LIVING HERD.
+// AGRITAIRE rules engine (v6) — production chains, temperature, living herd.
 //
 // Cards arrive in MINI-DECKS (a season's hand). The first is free; each later
-// one is an OPERATING LOAN paid in 🌱 SEEDS. Each turn you PLACE a card on a row
-// (ascending runs) or SELL it for seeds.
+// one is an OPERATING LOAN paid in 🌱 SEEDS. Place cards on rows as a chain
+//   empty → Field → Seed (matching season) → Equipment
+// or SELL them for seeds. Livestock extras sit on a completed chain.
+// Expansion adds a row; Boom instantly adds grain or a cow.
 //
-// Folding a run (>=3):
-//   🌾 Harvest → grain bank (+ seeds). Grain is the Grain Bank: it FEEDS cattle.
-//   🐄 Cattle  → adds live animals to your herd.
+// Folding a completed chain:
+//   🌾 Harvest → Grain Bank (+ seeds)
+//   🐄 Cattle  → live animals in the Pasture
 //
-// The HERD is alive: every new season each animal EATS grain (FEED_PER_CATTLE).
-// Unfed animals STARVE (lost). Animals AGE, and when their lifespan ends they
-// leave the board and CASH OUT for big points. Survivors are sold at game end.
-//
-// End states: deck empty → season complete; hand empty & can't afford the next
-// loan → bankrupt.
+// The HERD eats grain each new season, ages, cashes out, or starves.
+// End: deck empty → done; broke with cards remaining → bankrupt.
 
-import { Card, Suit, createDeck, shuffle, mulberry32, isWild } from './cards';
+import {
+  Card,
+  Suit,
+  SeasonName,
+  SEASONS,
+  createDeck,
+  shuffle,
+  mulberry32,
+  isInstant,
+} from './cards';
 
 export const ROW_COUNT = 4;
-export const MIN_RUN = 3;
+export const ROW_CAP = 6;
 
-// Living herd.
-export const CATTLE_LIFESPAN = 3; // seasons an animal stays before cashing out
-export const FEED_PER_CATTLE = 1; // grain eaten per animal per season
-export const CATTLE_CASHOUT = 8; // big points when an animal ages out
-export const HERD_END_BONUS = 4; // points per surviving animal at game end
+export const CATTLE_LIFESPAN = 3;
+export const FEED_PER_CATTLE = 1;
+export const CATTLE_CASHOUT = 8;
+export const HERD_END_BONUS = 4;
 
-// Seasons & the seed economy.
 export const MINI_DECK_SIZE = 5;
 export const SEEDS_START = 5;
 export const MINI_DECK_COST = 2;
 export const SELL_VALUE = 1;
-export const WILD_SELL_VALUE = 2;
+export const INSTANT_SELL_VALUE = 2;
 export const HARVEST_SEED_YIELD = 2;
+export const BOOM_GRAIN_MAX = 6;
 
 export type FoldMode = 'grain' | 'cattle';
+export type BoomChoice = 'grain' | 'cow';
+export type ChainNeed = 'field' | 'seed' | 'equipment' | 'livestock' | null;
 
 export interface Row {
   cards: Card[];
-  base: number;
 }
 
 export interface Cattle {
   id: string;
-  life: number; // seasons of life remaining
+  life: number;
 }
 
 export interface GameState {
@@ -51,7 +58,7 @@ export interface GameState {
   hand: Card[];
   seeds: number;
   rows: Row[];
-  grain: number; // the Grain Bank — feeds the herd
+  grain: number;
   herd: Cattle[];
   score: number;
   season: number;
@@ -61,10 +68,11 @@ export interface GameState {
   nextCow: number;
   over: boolean;
   failed: boolean;
+  rng: () => number;
 }
 
-function emptyRows(): Row[] {
-  return Array.from({ length: ROW_COUNT }, () => ({ cards: [], base: 0 }));
+function emptyRows(n: number): Row[] {
+  return Array.from({ length: n }, () => ({ cards: [] }));
 }
 
 function drawInto(state: GameState, n: number): void {
@@ -73,13 +81,17 @@ function drawInto(state: GameState, n: number): void {
   }
 }
 
+export function currentSeason(seasonNumber: number): SeasonName {
+  return SEASONS[(seasonNumber - 1 + SEASONS.length * 8) % SEASONS.length];
+}
+
 export function newGame(seed?: number): GameState {
   const rng = seed === undefined ? Math.random : mulberry32(seed);
   const state: GameState = {
     deck: shuffle(createDeck(), rng),
     hand: [],
     seeds: SEEDS_START,
-    rows: emptyRows(),
+    rows: emptyRows(ROW_COUNT),
     grain: 0,
     herd: [],
     score: 0,
@@ -90,40 +102,65 @@ export function newGame(seed?: number): GameState {
     nextCow: 0,
     over: false,
     failed: false,
+    rng,
   };
   drawInto(state, MINI_DECK_SIZE);
   return state;
 }
 
 export function cloneState(state: GameState): GameState {
-  return structuredClone(state);
+  const copy = structuredClone(state) as GameState;
+  copy.rng = state.rng;
+  return copy;
 }
 
-// ── Placement ─────────────────────────────────────────────────────────────
+// ── Chain placement ───────────────────────────────────────────────────────
 
-export function effectiveTop(row: Row): number | null {
-  return row.cards.length === 0 ? null : row.base + row.cards.length - 1;
+export function hasClass(row: Row, suit: Suit): boolean {
+  return row.cards.some((c) => c.suit === suit);
 }
 
-export function canPlace(card: Card, row: Row): boolean {
-  if (row.cards.length === 0) return true;
-  if (isWild(card)) return true;
-  return card.rank === effectiveTop(row)! + 1;
+/** What the row needs next, or 'livestock' when the chain is complete. */
+export function nextNeeded(row: Row): ChainNeed {
+  if (row.cards.length === 0) return 'field';
+  if (!hasClass(row, 'field')) return 'field';
+  if (!hasClass(row, 'seed')) return 'seed';
+  if (!hasClass(row, 'equipment')) return 'equipment';
+  return 'livestock';
+}
+
+export function canFold(row: Row): boolean {
+  return hasClass(row, 'equipment');
+}
+
+export function canPlace(card: Card, row: Row, season: SeasonName): boolean {
+  if (isInstant(card)) return false;
+  const need = nextNeeded(row);
+  if (need === 'field') return card.suit === 'field';
+  if (need === 'seed') return card.suit === 'seed' && card.season === season;
+  if (need === 'equipment') return card.suit === 'equipment';
+  if (need === 'livestock') return card.suit === 'livestock';
+  return false;
 }
 
 export function anyValidPlacement(state: GameState): boolean {
-  return state.hand.some((card) => state.rows.some((r) => canPlace(card, r)));
+  const season = currentSeason(state.season);
+  return state.hand.some(
+    (card) =>
+      (card.suit === 'expansion' && state.rows.length < ROW_CAP) ||
+      card.suit === 'boom' ||
+      state.rows.some((r) => canPlace(card, r, season)),
+  );
 }
 
-/** Grain the herd will eat next season. */
 export function feedCost(state: GameState): number {
   return state.herd.length * FEED_PER_CATTLE;
 }
 
-// ── Season / mini-deck economy ────────────────────────────────────────────────
+// ── Season / mini-deck economy ────────────────────────────────────────────
 
 export function sellValue(card: Card): number {
-  return isWild(card) ? WILD_SELL_VALUE : SELL_VALUE;
+  return isInstant(card) ? INSTANT_SELL_VALUE : SELL_VALUE;
 }
 
 export function canDrawMiniDeck(state: GameState): boolean {
@@ -135,23 +172,20 @@ export function canDrawMiniDeck(state: GameState): boolean {
   );
 }
 
-/** Feed, age, cash out, and starve the herd as a new season begins. */
 export function advanceHerd(state: GameState): void {
   if (state.herd.length === 0) return;
 
-  // Feed from the Grain Bank; unfed animals starve.
   const need = feedCost(state);
   if (state.grain >= need) {
     state.grain -= need;
   } else {
     const fed = Math.floor(state.grain / FEED_PER_CATTLE);
     state.grain -= fed * FEED_PER_CATTLE;
-    state.herd.sort((a, b) => a.life - b.life); // keep animals closest to cashing out
+    state.herd.sort((a, b) => a.life - b.life);
     state.cattleStarved += state.herd.length - fed;
     state.herd = state.herd.slice(0, fed);
   }
 
-  // Age survivors; those that reach the end of life cash out for big points.
   const survivors: Cattle[] = [];
   for (const cow of state.herd) {
     cow.life -= 1;
@@ -165,7 +199,6 @@ export function advanceHerd(state: GameState): void {
   state.herd = survivors;
 }
 
-/** Take the operating loan, advance the season (herd feeds/ages), and draw. */
 export function drawMiniDeck(state: GameState): boolean {
   if (!canDrawMiniDeck(state)) return false;
   state.seeds -= MINI_DECK_COST;
@@ -179,7 +212,7 @@ function finish(state: GameState, failed: boolean): void {
   if (state.over) return;
   state.over = true;
   state.failed = failed;
-  if (!failed) state.score += state.herd.length * HERD_END_BONUS; // sell survivors
+  if (!failed) state.score += state.herd.length * HERD_END_BONUS;
 }
 
 function settleHand(state: GameState): void {
@@ -195,6 +228,13 @@ function handIndex(state: GameState, cardId: string): number {
   return state.hand.findIndex((c) => c.id === cardId);
 }
 
+function takeFromHand(state: GameState, cardId: string): Card | null {
+  const idx = handIndex(state, cardId);
+  if (idx < 0) return null;
+  const [card] = state.hand.splice(idx, 1);
+  return card;
+}
+
 export function placeFromHand(state: GameState, cardId: string, rowIndex: number): boolean {
   if (state.over) return false;
   const idx = handIndex(state, cardId);
@@ -202,8 +242,7 @@ export function placeFromHand(state: GameState, cardId: string, rowIndex: number
   const row = state.rows[rowIndex];
   if (!row) return false;
   const card = state.hand[idx];
-  if (!canPlace(card, row)) return false;
-  if (row.cards.length === 0) row.base = isWild(card) ? 1 : card.rank;
+  if (!canPlace(card, row, currentSeason(state.season))) return false;
   row.cards.push(card);
   state.hand.splice(idx, 1);
   settleHand(state);
@@ -221,11 +260,34 @@ export function sellCard(state: GameState, cardId: string): boolean {
   return true;
 }
 
-// ── Folding ──────────────────────────────────────────────────────────────────
-
-export function canFold(row: Row): boolean {
-  return row.cards.length >= MIN_RUN;
+export function playExpansion(state: GameState, cardId: string): boolean {
+  if (state.over) return false;
+  const idx = handIndex(state, cardId);
+  if (idx < 0) return false;
+  if (state.hand[idx].suit !== 'expansion') return false;
+  if (state.rows.length >= ROW_CAP) return false;
+  takeFromHand(state, cardId);
+  state.rows.push({ cards: [] });
+  settleHand(state);
+  return true;
 }
+
+export function playBoom(state: GameState, cardId: string, choice: BoomChoice): boolean {
+  if (state.over) return false;
+  const idx = handIndex(state, cardId);
+  if (idx < 0) return false;
+  if (state.hand[idx].suit !== 'boom') return false;
+  takeFromHand(state, cardId);
+  if (choice === 'grain') {
+    state.grain += 1 + Math.floor(state.rng() * BOOM_GRAIN_MAX);
+  } else {
+    state.herd.push({ id: `cow-${state.nextCow++}`, life: CATTLE_LIFESPAN });
+  }
+  settleHand(state);
+  return true;
+}
+
+// ── Folding ───────────────────────────────────────────────────────────────
 
 function countSuit(cards: Card[], suit: Suit): number {
   return cards.filter((c) => c.suit === suit).length;
@@ -240,24 +302,22 @@ export function foldRow(state: GameState, rowIndex: number, mode: FoldMode): boo
   const fieldBonus = countSuit(row.cards, 'field');
 
   if (mode === 'grain') {
-    const grainBonus = countSuit(row.cards, 'grain');
-    state.grain += len + grainBonus;
+    const seedBonus = countSuit(row.cards, 'seed');
+    state.grain += len + seedBonus;
     state.seeds += HARVEST_SEED_YIELD;
     state.score += len + fieldBonus;
   } else {
-    const count = len + countSuit(row.cards, 'livestock');
+    const extras = countSuit(row.cards, 'livestock');
+    const count = 1 + extras;
     for (let i = 0; i < count; i++) {
       state.herd.push({ id: `cow-${state.nextCow++}`, life: CATTLE_LIFESPAN });
     }
-    state.score += fieldBonus; // real payoff comes when they cash out
+    state.score += fieldBonus;
   }
 
   row.cards = [];
-  row.base = 0;
   return true;
 }
-
-// ── Queries ──────────────────────────────────────────────────────────────────
 
 export function isWon(state: GameState): boolean {
   return state.over && !state.failed;
