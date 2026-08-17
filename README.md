@@ -94,18 +94,35 @@ npm run preview  # serve the production build
 
 ## Deploy (Render, free)
 
-`render.yaml` is a **free** static-site blueprint. Vite and TypeScript live in
-`devDependencies`, so the build must install them even when Render sets
-`NODE_ENV=production`:
+AGRITAIRE is a Vite + TypeScript game. If you created a **Python Web Service**
+(Render's default language), the build command is `pip install -r requirements.txt`.
+This repo includes that file plus a small Gunicorn app (`your_application.wsgi`)
+that serves `dist/`.
+
+### Already created a Python Web Service?
+
+Keep the dashboard defaults. After this lands on the deployed branch:
+
+- **Build command:** `pip install -r requirements.txt`
+- **Start command:** `gunicorn your_application.wsgi`
+
+Gunicorn binds `0.0.0.0:$PORT` via `gunicorn.conf.py`. If `dist/` is missing at
+boot and Node is available, the app runs `npm ci --include=dev && npm run build`.
+To build during deploy instead of boot, change the build command to:
+
+```bash
+pip install -r requirements.txt && npm ci --include=dev && npm run build
+```
+
+### New service (Blueprint or Static Site)
+
+`render.yaml` defines a free Python web service that installs Gunicorn, builds
+the Vite bundle, and starts Gunicorn. Or create a **Static Site** instead:
 
 - **Plan:** Free
 - **Build command:** `npm ci --include=dev && npm run build`
 - **Publish directory:** `./dist`
 - **Node:** 20
-
-Until this branch is on `main`, point the Render service at
-`cursor/agritaire-vertical-stacks-63ef` (or merge PR #3). Building `main` still
-compiles the old Chrome extension and will fail as a playable site.
 
 `?seed=N` works on the hosted URL. There is no login or paywall — the game is
 free to play at the `onrender.com` URL.
@@ -113,6 +130,8 @@ free to play at the `onrender.com` URL.
 ## Project layout
 
 ```
+requirements.txt            # Render Python build (`pip install -r requirements.txt`)
+your_application/wsgi.py    # `gunicorn your_application.wsgi` serves dist/
 src/
   game/
     cards.ts        # suits, asset tiers, seasons, deck, seeded shuffle
