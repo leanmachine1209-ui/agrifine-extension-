@@ -1,19 +1,17 @@
-// AGRITAIRE rules engine (v3) — turn-based sequential stacking with a seed economy.
+// AGRITAIRE rules engine (v4) — seasons, mini-decks & operating loans.
 //
-// SEEDS are a numerical resource: you start with a few, they GROW by one every
-// turn, and they are SPENT to draw more cards into your hand. So banking seeds
-// lets you pull several cards at once for more placement options.
+// Cards arrive in MINI-DECKS (a season's hand). The first mini-deck is free;
+// each later one is an OPERATING LOAN paid in 🌱 SEEDS. You either PLACE a card
+// on a row (build ascending runs → fold for points) or SELL it for seeds.
 //
-// Each card you hold must be placed on one of four rows, which build strictly
-// ascending consecutive runs (rank +1); a ⭐ wild fills any slot. Discarding (or
-// being unable to place) SPOILS a card — too many spoils and the farm fails.
+// When your hand empties:
+//   • deck also empty  → the run is over, you're done (season complete).
+//   • can't afford the next mini-deck → BANKRUPT (sell earlier next time!).
+// Otherwise take the loan to draw the next mini-deck.
 //
-// A row of >=3 cards can be folded:
-//   🌾 Harvest → grain bank (grain raises cattle capacity)
-//   🐄 Cattle  → cattle for points (2×), capped by preservation capacity
-//
-// Suit bonuses on fold: grain cards boost harvests, livestock cards boost the
-// herd, field cards add bonus points, wilds are flexible filler.
+// Rows build strictly ascending consecutive runs (rank +1); ⭐ wild fills any
+// slot. A run of >=3 folds as 🌾 Harvest (grain bank, +seeds) or 🐄 Cattle
+// (points ×2, capped by preservation capacity). Grain raises cattle capacity.
 
 import { Card, Suit, createDeck, shuffle, mulberry32, isWild } from './cards';
 
@@ -21,61 +19,67 @@ export const ROW_COUNT = 4;
 export const MIN_RUN = 3;
 export const BASE_HERD = 2;
 export const GRAIN_PER_CATTLE = 2;
-export const SPOIL_LIMIT = 12;
-export const HERD_END_BONUS = 3;
 export const CATTLE_POINTS = 2;
+export const HERD_END_BONUS = 3;
 
-// Seed economy.
-export const SEEDS_START = 3;
-export const SEEDS_PER_TURN = 1; // seeds grow each turn
-export const DRAW_COST = 1; // seeds spent to draw a card
-export const SEEDS_MAX = 12; // cap so seeds don't run away
-export const HAND_MAX = 5; // most cards you can hold
+// Seasons & the seed economy.
+export const MINI_DECK_SIZE = 5; // cards drawn per season
+export const SEEDS_START = 5; // starting operating capital
+export const MINI_DECK_COST = 2; // seed loan to draw the next mini-deck
+export const SELL_VALUE = 1; // seeds gained selling a ranked card
+export const WILD_SELL_VALUE = 2; // wilds are worth more when sold
+export const HARVEST_SEED_YIELD = 2; // grain harvest also returns seeds
 
 export type FoldMode = 'grain' | 'cattle';
 
 export interface Row {
   cards: Card[];
-  base: number; // rank of the first card (1 if a wild started the row)
+  base: number;
 }
 
 export interface GameState {
-  deck: Card[]; // face-down draw pile; next card is popped from the end
-  hand: Card[]; // cards you hold, drawn by spending seeds
-  seeds: number; // draw currency: grows each turn, spent to draw
+  deck: Card[];
+  hand: Card[];
+  seeds: number;
   rows: Row[];
-  grain: number; // preserves cattle (raises capacity)
-  herd: number; // preserved cattle
+  grain: number;
+  herd: number;
   score: number;
-  spoiled: number;
-  cattleLost: number; // cattle that could not be preserved (over capacity)
-  turn: number;
+  season: number;
+  sold: number;
+  cattleLost: number;
   over: boolean;
-  failed: boolean;
+  failed: boolean; // ended by bankruptcy rather than finishing the deck
 }
 
 function emptyRows(): Row[] {
   return Array.from({ length: ROW_COUNT }, () => ({ cards: [], base: 0 }));
 }
 
+function drawInto(state: GameState, n: number): void {
+  for (let i = 0; i < n && state.deck.length > 0; i++) {
+    state.hand.push(state.deck.pop()!);
+  }
+}
+
 export function newGame(seed?: number): GameState {
   const rng = seed === undefined ? Math.random : mulberry32(seed);
-  const deck = shuffle(createDeck(), rng);
-  const first = deck.pop(); // one free starter card
-  return {
-    deck,
-    hand: first ? [first] : [],
+  const state: GameState = {
+    deck: shuffle(createDeck(), rng),
+    hand: [],
     seeds: SEEDS_START,
     rows: emptyRows(),
     grain: 0,
     herd: 0,
     score: 0,
-    spoiled: 0,
+    season: 1,
+    sold: 0,
     cattleLost: 0,
-    turn: 1,
     over: false,
     failed: false,
   };
+  drawInto(state, MINI_DECK_SIZE); // first mini-deck is free
+  return state;
 }
 
 export function cloneState(state: GameState): GameState {
@@ -102,26 +106,29 @@ export function anyValidPlacement(state: GameState): boolean {
   return state.hand.some((card) => state.rows.some((r) => canPlace(card, r)));
 }
 
-// ── Seed economy / drawing ────────────────────────────────────────────────────
+// ── Season / mini-deck economy ────────────────────────────────────────────────
 
-export function canDraw(state: GameState): boolean {
+export function sellValue(card: Card): number {
+  return isWild(card) ? WILD_SELL_VALUE : SELL_VALUE;
+}
+
+export function canDrawMiniDeck(state: GameState): boolean {
   return (
     !state.over &&
+    state.hand.length === 0 &&
     state.deck.length > 0 &&
-    state.hand.length < HAND_MAX &&
-    state.seeds >= DRAW_COST
+    state.seeds >= MINI_DECK_COST
   );
 }
 
-/** Spend seeds to draw a card into the hand. */
-export function drawCard(state: GameState): boolean {
-  if (!canDraw(state)) return false;
-  state.seeds -= DRAW_COST;
-  state.hand.push(state.deck.pop()!);
+/** Take the operating loan and draw the next mini-deck. */
+export function drawMiniDeck(state: GameState): boolean {
+  if (!canDrawMiniDeck(state)) return false;
+  state.seeds -= MINI_DECK_COST;
+  state.season++;
+  drawInto(state, MINI_DECK_SIZE);
   return true;
 }
-
-// ── Turn flow ────────────────────────────────────────────────────────────────
 
 function finish(state: GameState, failed: boolean): void {
   if (state.over) return;
@@ -130,18 +137,21 @@ function finish(state: GameState, failed: boolean): void {
   if (!failed) state.score += state.herd * HERD_END_BONUS;
 }
 
-/** Advance the turn: seeds grow, and the game ends when nothing is left to play. */
-function tickTurn(state: GameState): void {
-  state.turn++;
-  state.seeds = Math.min(SEEDS_MAX, state.seeds + SEEDS_PER_TURN);
-  if (state.deck.length === 0 && state.hand.length === 0) finish(state, false);
+/** After the hand changes, settle end-of-season outcomes. */
+function settleHand(state: GameState): void {
+  if (state.over || state.hand.length > 0) return;
+  if (state.deck.length === 0) {
+    finish(state, false); // worked the whole deck
+  } else if (state.seeds < MINI_DECK_COST) {
+    finish(state, true); // can't fund the next season
+  }
+  // else: wait for the player to take the loan (drawMiniDeck).
 }
 
 function handIndex(state: GameState, cardId: string): number {
   return state.hand.findIndex((c) => c.id === cardId);
 }
 
-/** Place a held card onto a row. Returns false if illegal. */
 export function placeFromHand(state: GameState, cardId: string, rowIndex: number): boolean {
   if (state.over) return false;
   const idx = handIndex(state, cardId);
@@ -153,22 +163,19 @@ export function placeFromHand(state: GameState, cardId: string, rowIndex: number
   if (row.cards.length === 0) row.base = isWild(card) ? 1 : card.rank;
   row.cards.push(card);
   state.hand.splice(idx, 1);
-  tickTurn(state);
+  settleHand(state);
   return true;
 }
 
-/** Discard a held card — it spoils and is lost. */
-export function discardFromHand(state: GameState, cardId: string): boolean {
+/** Sell a held card for seeds — funds the next operating loan. */
+export function sellCard(state: GameState, cardId: string): boolean {
   if (state.over) return false;
   const idx = handIndex(state, cardId);
   if (idx < 0) return false;
+  state.seeds += sellValue(state.hand[idx]);
+  state.sold++;
   state.hand.splice(idx, 1);
-  state.spoiled++;
-  if (state.spoiled >= SPOIL_LIMIT) {
-    finish(state, true);
-  } else {
-    tickTurn(state);
-  }
+  settleHand(state);
   return true;
 }
 
@@ -193,6 +200,7 @@ export function foldRow(state: GameState, rowIndex: number, mode: FoldMode): boo
   if (mode === 'grain') {
     const grainBonus = countSuit(row.cards, 'grain');
     state.grain += len + grainBonus;
+    state.seeds += HARVEST_SEED_YIELD; // sell grain for operating capital
     state.score += len + fieldBonus;
   } else {
     const liveBonus = countSuit(row.cards, 'livestock');

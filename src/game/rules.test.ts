@@ -4,18 +4,20 @@ import {
   GameState,
   Row,
   ROW_COUNT,
-  SPOIL_LIMIT,
+  MINI_DECK_SIZE,
   SEEDS_START,
-  HAND_MAX,
-  SEEDS_MAX,
+  MINI_DECK_COST,
+  WILD_SELL_VALUE,
+  HARVEST_SEED_YIELD,
   newGame,
   capacity,
   effectiveTop,
   canPlace,
-  canDraw,
-  drawCard,
+  sellValue,
+  sellCard,
+  canDrawMiniDeck,
+  drawMiniDeck,
   placeFromHand,
-  discardFromHand,
   canFold,
   foldRow,
   cardsRemaining,
@@ -40,65 +42,30 @@ function baseState(overrides: Partial<GameState> = {}): GameState {
     grain: 0,
     herd: 0,
     score: 0,
-    spoiled: 0,
+    season: 1,
+    sold: 0,
     cattleLost: 0,
-    turn: 1,
     over: false,
     failed: false,
     ...overrides,
   };
 }
 
-describe('deck', () => {
-  it('has 39 ranked cards + 6 wilds', () => {
-    const deck = createDeck();
-    expect(deck).toHaveLength(45);
-    for (const s of ['livestock', 'grain', 'field'] as Suit[]) {
-      expect(deck.filter((x) => x.suit === s)).toHaveLength(13);
-    }
-    expect(deck.filter((x) => x.suit === 'wild')).toHaveLength(6);
+describe('deck & new game', () => {
+  it('has 45 cards; new game deals a free mini-deck', () => {
+    expect(createDeck()).toHaveLength(45);
+    const s = newGame(3);
+    expect(s.hand).toHaveLength(MINI_DECK_SIZE);
+    expect(s.seeds).toBe(SEEDS_START);
+    expect(s.deck).toHaveLength(45 - MINI_DECK_SIZE);
+    expect(s.season).toBe(1);
+    expect(cardsRemaining(s)).toBe(45);
   });
 
   it('seeded shuffle is reproducible', () => {
-    const a = shuffle(createDeck(), mulberry32(5)).map((x) => x.id);
-    const b = shuffle(createDeck(), mulberry32(5)).map((x) => x.id);
+    const a = shuffle(createDeck(), mulberry32(9)).map((x) => x.id);
+    const b = shuffle(createDeck(), mulberry32(9)).map((x) => x.id);
     expect(a).toEqual(b);
-  });
-});
-
-describe('newGame', () => {
-  it('starts with a seed count and one free card', () => {
-    const s = newGame(3);
-    expect(s.seeds).toBe(SEEDS_START);
-    expect(s.hand).toHaveLength(1);
-    expect(s.deck).toHaveLength(44);
-    expect(cardsRemaining(s)).toBe(45);
-  });
-});
-
-describe('seed economy', () => {
-  it('spends a seed to draw a card into the hand', () => {
-    const s = baseState({ deck: [c('field', 2), c('grain', 9)], seeds: 3, hand: [] });
-    expect(canDraw(s)).toBe(true);
-    expect(drawCard(s)).toBe(true);
-    expect(s.seeds).toBe(2);
-    expect(s.hand).toHaveLength(1);
-  });
-
-  it('cannot draw with no seeds, empty deck, or a full hand', () => {
-    expect(canDraw(baseState({ deck: [c('field', 1)], seeds: 0 }))).toBe(false);
-    expect(canDraw(baseState({ deck: [], seeds: 3 }))).toBe(false);
-    const full = baseState({ deck: [c('field', 1)], seeds: 3, hand: Array(HAND_MAX).fill(c('field', 1)) });
-    expect(canDraw(full)).toBe(false);
-  });
-
-  it('seeds grow by one each turn and are capped', () => {
-    const s = baseState({ hand: [c('field', 5)], deck: [c('grain', 9)], seeds: 3 });
-    placeFromHand(s, 'field-5', 0); // a turn passes
-    expect(s.seeds).toBe(4);
-    const near = baseState({ hand: [c('field', 5)], deck: [c('grain', 9)], seeds: SEEDS_MAX });
-    placeFromHand(near, 'field-5', 0);
-    expect(near.seeds).toBe(SEEDS_MAX); // capped
   });
 });
 
@@ -112,37 +79,66 @@ describe('placement', () => {
     expect(canPlace(c('wild', 0), r)).toBe(true);
   });
 
-  it('places a held card and removes it from the hand', () => {
-    const s = baseState({ hand: [c('grain', 6), c('field', 1)], deck: [] });
+  it('places a held card onto a row', () => {
+    const s = baseState({ hand: [c('grain', 6), c('field', 1)], deck: [c('field', 9)] });
     s.rows[0] = row([c('field', 5)]);
     expect(placeFromHand(s, 'grain-6', 0)).toBe(true);
     expect(s.rows[0].cards.map((x) => x.id)).toEqual(['field-5', 'grain-6']);
     expect(s.hand.map((x) => x.id)).toEqual(['field-1']);
-    expect(s.turn).toBe(2);
-  });
-
-  it('rejects an illegal placement', () => {
-    const s = baseState({ hand: [c('grain', 8)] });
-    s.rows[0] = row([c('field', 5)]);
-    expect(placeFromHand(s, 'grain-8', 0)).toBe(false);
-    expect(s.hand).toHaveLength(1);
   });
 });
 
-describe('discard / spoil', () => {
-  it('discarding loses the card and advances the turn', () => {
-    const s = baseState({ hand: [c('grain', 1)], deck: [c('field', 1)], seeds: 3 });
-    expect(discardFromHand(s, 'grain-1')).toBe(true);
-    expect(s.spoiled).toBe(1);
-    expect(s.hand).toHaveLength(0);
-    expect(s.seeds).toBe(4); // grew this turn
+describe('selling', () => {
+  it('sells a card for seeds (wild worth more)', () => {
+    const s = baseState({ hand: [c('field', 4), c('wild', 1)], deck: [c('grain', 2)], seeds: 5 });
+    expect(sellValue(c('wild', 1))).toBe(WILD_SELL_VALUE);
+    expect(sellCard(s, 'wild-1')).toBe(true);
+    expect(s.seeds).toBe(5 + WILD_SELL_VALUE);
+    expect(s.sold).toBe(1);
+    expect(s.hand.map((x) => x.id)).toEqual(['field-4']);
+  });
+});
+
+describe('mini-deck loans', () => {
+  it('can only draw a mini-deck when hand is empty, deck remains, and affordable', () => {
+    expect(canDrawMiniDeck(baseState({ hand: [], deck: [c('grain', 1)], seeds: MINI_DECK_COST }))).toBe(true);
+    expect(canDrawMiniDeck(baseState({ hand: [c('grain', 1)], deck: [c('grain', 2)], seeds: 5 }))).toBe(false);
+    expect(canDrawMiniDeck(baseState({ hand: [], deck: [c('grain', 1)], seeds: MINI_DECK_COST - 1 }))).toBe(false);
+    expect(canDrawMiniDeck(baseState({ hand: [], deck: [], seeds: 5 }))).toBe(false);
   });
 
-  it('too many spoils fails the farm', () => {
-    const s = baseState({ hand: [c('grain', 1)], deck: [c('field', 1)], spoiled: SPOIL_LIMIT - 1 });
-    discardFromHand(s, 'grain-1');
+  it('taking the loan spends seeds, bumps the season, and draws cards', () => {
+    const s = baseState({ hand: [], deck: [c('grain', 1), c('field', 2), c('field', 3)], seeds: 5 });
+    expect(drawMiniDeck(s)).toBe(true);
+    expect(s.seeds).toBe(5 - MINI_DECK_COST);
+    expect(s.season).toBe(2);
+    expect(s.hand).toHaveLength(3); // drew what remained (< MINI_DECK_SIZE)
+  });
+});
+
+describe('end conditions', () => {
+  it('finishing the deck ends the run and pays a herd bonus', () => {
+    const s = baseState({ hand: [c('field', 1)], deck: [], herd: 3 });
+    placeFromHand(s, 'field-1', 0); // hand empties, deck empty -> done
+    expect(s.over).toBe(true);
+    expect(s.failed).toBe(false);
+    expect(s.score).toBe(3 * 3);
+  });
+
+  it('emptying the hand while broke and cards remain = bankruptcy', () => {
+    const s = baseState({ hand: [c('field', 1)], deck: [c('grain', 2)], seeds: MINI_DECK_COST - 1 });
+    placeFromHand(s, 'field-1', 0);
     expect(s.over).toBe(true);
     expect(s.failed).toBe(true);
+  });
+
+  it('selling can raise seeds enough to avoid bankruptcy', () => {
+    const s = baseState({ hand: [c('field', 1), c('wild', 1)], deck: [c('grain', 2)], seeds: 0 });
+    sellCard(s, 'wild-1'); // +2 seeds, hand still has field-1
+    expect(s.over).toBe(false);
+    placeFromHand(s, 'field-1', 0); // hand empties; seeds(2) >= cost -> not bankrupt, awaiting loan
+    expect(s.over).toBe(false);
+    expect(canDrawMiniDeck(s)).toBe(true);
   });
 });
 
@@ -152,41 +148,22 @@ describe('folding', () => {
     expect(canFold(row([c('grain', 1), c('grain', 2), c('field', 3)]))).toBe(true);
   });
 
-  it('harvest adds grain (+grain bonus) and points (+field bonus)', () => {
-    const s = baseState();
+  it('harvest adds grain + seeds + points; capacity is base + grain/2', () => {
+    const s = baseState({ seeds: 0 });
     s.rows[0] = row([c('grain', 3), c('grain', 4), c('field', 5)]);
     expect(foldRow(s, 0, 'grain')).toBe(true);
     expect(s.grain).toBe(3 + 2);
+    expect(s.seeds).toBe(HARVEST_SEED_YIELD);
     expect(s.score).toBe(3 + 1);
-    expect(s.rows[0].cards).toHaveLength(0);
+    expect(capacity(s)).toBe(2 + Math.floor(5 / 2));
   });
 
-  it('cattle is capped by capacity; grain raises the cap', () => {
+  it('cattle is capped by capacity', () => {
     const s = baseState({ grain: 0, herd: 0 });
     s.rows[0] = row([c('livestock', 3), c('field', 4), c('grain', 5)]);
     expect(foldRow(s, 0, 'cattle')).toBe(true);
-    expect(s.herd).toBe(2); // capacity 2
+    expect(s.herd).toBe(2);
     expect(s.cattleLost).toBe(2);
     expect(s.score).toBe(2 * 2 + 1);
-
-    s.grain = 6; // capacity 5
-    s.rows[1] = row([c('livestock', 6), c('livestock', 7), c('livestock', 8)]);
-    foldRow(s, 1, 'cattle'); // want 6, room 3
-    expect(s.herd).toBe(5);
-  });
-});
-
-describe('capacity + game end', () => {
-  it('capacity is base + grain/2', () => {
-    expect(capacity(baseState({ grain: 0 }))).toBe(2);
-    expect(capacity(baseState({ grain: 6 }))).toBe(5);
-  });
-
-  it('awards a herd bonus when nothing is left to play', () => {
-    const s = baseState({ hand: [c('field', 1)], deck: [], herd: 3 });
-    placeFromHand(s, 'field-1', 0);
-    expect(s.over).toBe(true);
-    expect(s.failed).toBe(false);
-    expect(s.score).toBe(3 * 3);
   });
 });

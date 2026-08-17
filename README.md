@@ -14,20 +14,23 @@ A **turn-based**, sequential stacking game. Four suits:
 - 🟩 **Field** — the very sequential backbone; adds bonus points
 - ⭐ **Wildcard** — fills any slot in a run
 
-### Seeds & drawing
+### Seeds, seasons & operating loans
 
-- You start with a small **🌱 seed count**. Seeds **grow by one every turn** and are
-  **spent to draw cards** (−1 per draw) into your hand (up to 5).
-- Banking seeds lets you pull several cards at once for more placement options.
+- Cards arrive in **mini-decks of 5** — one season's hand. The **first is free**.
+- Each new mini-deck is an **operating loan** paid in **🌱 seeds** (−2). You start
+  with 5 seeds.
+- When your hand empties: if the **deck is empty you're done** (season complete); if
+  you **can't afford the next loan you go bankrupt** — so bank seeds before you run out.
+- **Sell cards** for seeds (+1, wild +2) to fund the next season. Harvesting grain also
+  returns a couple of seeds.
 
-### How a turn works
+### How you play a hand
 
-- Draw cards with seeds, then **place a card** on one of the **four rows**. Rows build
-  **strictly ascending consecutive runs** (each card must be exactly one rank higher
-  than the row's top). A ⭐ wild fills any slot. Placing (or discarding) advances the
-  turn, so your seeds regrow.
-- If a card fits nowhere (or you choose), **discard** it — it **spoils** and is lost.
-  Spoil too many (12) and the **farm fails**.
+- **Place a card** on one of the **four rows**, which build **strictly ascending
+  consecutive runs** (each card exactly one rank higher than the top). A ⭐ wild fills
+  any slot.
+- Or **sell** the card for seeds. Every card is either placed or sold, so the hand
+  always clears and you move to the next season.
 
 ### Folding a set
 
@@ -42,10 +45,10 @@ field cards add bonus points. Surviving cattle pay a bonus when the deck runs ou
 
 ### Controls (touch + mouse)
 
-- **🌱 Draw** spends a seed to add a card to your hand.
 - **Tap a held card** to select it, then **tap a row** to place it (valid rows glow green).
-- **🌾 / 🐄** buttons on a foldable row bank it as grain or cattle.
-- **🗑 Discard** loses the selected card on purpose. **🌱 New Farm** reshuffles.
+- **💰 Sell** converts the selected card into seeds.
+- When the hand is empty, **🌱 Take Loan** draws the next season's mini-deck.
+- **🌾 / 🐄** buttons on a foldable run bank it as grain or cattle. **🌱 New Farm** reshuffles.
 - Add `?seed=N` to the URL for a reproducible (shareable) deal.
 
 ## Development

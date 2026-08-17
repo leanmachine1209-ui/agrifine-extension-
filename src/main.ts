@@ -3,9 +3,9 @@ import {
   GameState,
   FoldMode,
   newGame,
-  drawCard,
   placeFromHand,
-  discardFromHand,
+  sellCard,
+  drawMiniDeck,
   foldRow,
 } from './game/rules';
 import { boardHTML, overOverlayHTML, RenderModel } from './ui/render';
@@ -27,7 +27,6 @@ export class Agritaire {
     this.render();
   }
 
-  /** The selected held card, defaulting to the first in hand. */
   private currentSelection(): string | null {
     if (this.selectedId && this.state.hand.some((c) => c.id === this.selectedId)) {
       return this.selectedId;
@@ -45,7 +44,6 @@ export class Agritaire {
     this.root.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
       const el = target.closest<HTMLElement>('[data-action]');
-      // Selecting a held card (cards live inside the [data-hand] container).
       const handCard = target.closest<HTMLElement>('[data-hand] [data-card-id]');
       if (handCard && (!el || el.dataset.action !== 'place')) {
         this.selectedId = handCard.getAttribute('data-card-id');
@@ -55,39 +53,34 @@ export class Agritaire {
       if (!el) return;
 
       const action = el.dataset.action!;
-      const row = el.dataset.row !== undefined ? Number(el.dataset.row) : -1;
+      const rowIndex = el.dataset.row !== undefined ? Number(el.dataset.row) : -1;
       switch (action) {
-        case 'draw':
-          drawCard(this.state);
-          break;
         case 'place': {
           const sel = this.currentSelection();
-          if (sel && placeFromHand(this.state, sel, row)) this.selectedId = null;
+          if (sel && placeFromHand(this.state, sel, rowIndex)) this.selectedId = null;
           break;
         }
-        case 'discard': {
+        case 'sell': {
           const sel = this.currentSelection();
-          if (sel) discardFromHand(this.state, sel);
+          if (sel) sellCard(this.state, sel);
           this.selectedId = null;
           break;
         }
+        case 'draw-mini':
+          drawMiniDeck(this.state);
+          break;
         case 'fold-grain':
-          this.fold(row, 'grain');
-          return;
+          foldRow(this.state, rowIndex, 'grain' as FoldMode);
+          break;
         case 'fold-cattle':
-          this.fold(row, 'cattle');
-          return;
+          foldRow(this.state, rowIndex, 'cattle' as FoldMode);
+          break;
         case 'new':
           this.newGame();
           return;
       }
       this.render();
     });
-  }
-
-  private fold(rowIndex: number, mode: FoldMode): void {
-    foldRow(this.state, rowIndex, mode);
-    this.render();
   }
 
   private render(): void {

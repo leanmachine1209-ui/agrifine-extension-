@@ -126,6 +126,10 @@ body {
   filter: grayscale(0.4);
   cursor: not-allowed;
 }
+.btn--sell {
+  color: #fff;
+  background: linear-gradient(180deg, #f59e0b, #b45309);
+}
 .btn--discard:disabled {
   opacity: 0.5;
   cursor: not-allowed;
