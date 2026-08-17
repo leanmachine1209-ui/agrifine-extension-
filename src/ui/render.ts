@@ -1,4 +1,4 @@
-// Pure HTML builders for the AGRITAIRE (v2) turn-based board.
+// Pure HTML builders for the AGRITAIRE (v3) board: seed economy + hand of cards.
 
 import { Card, SUIT_INFO, rankLabel } from '../game/cards';
 import {
@@ -8,21 +8,31 @@ import {
   effectiveTop,
   canPlace,
   canFold,
-  isStuck,
+  canDraw,
+  anyValidPlacement,
   SPOIL_LIMIT,
+  DRAW_COST,
+  HAND_MAX,
 } from '../game/rules';
 
 export interface RenderModel {
   state: GameState;
+  selectedId: string | null; // which held card is selected
 }
 
-function cardHTML(card: Card, extra = ''): string {
+function cardHTML(card: Card, cls = ''): string {
   const info = SUIT_INFO[card.suit];
   return `
-    <div class="card card--${info.color} ${extra}" data-card-id="${card.id}">
+    <div class="card card--${info.color} ${cls}" data-card-id="${card.id}">
       <span class="card-rank">${rankLabel(card)}</span>
       <span class="card-suit">${info.emoji}</span>
     </div>`;
+}
+
+function selectedCard(state: GameState, selectedId: string | null): Card | null {
+  return (
+    state.hand.find((c) => c.id === selectedId) ?? state.hand[0] ?? null
+  );
 }
 
 function rowHintHTML(row: Row): string {
@@ -32,9 +42,9 @@ function rowHintHTML(row: Row): string {
   return `<span class="row-hint">needs <b>${next}</b> or ⭐</span>`;
 }
 
-function rowHTML(state: GameState, index: number): string {
+function rowHTML(state: GameState, index: number, sel: Card | null): string {
   const row = state.rows[index];
-  const valid = state.hand && canPlace(state.hand, row) ? ' is-valid' : '';
+  const valid = sel && canPlace(sel, row) ? ' is-valid' : '';
   const cards = row.cards.length
     ? row.cards.map((c) => cardHTML(c)).join('')
     : '<div class="row-empty"></div>';
@@ -56,11 +66,21 @@ function rowHTML(state: GameState, index: number): string {
 export function boardHTML(model: RenderModel): string {
   const s = model.state;
   const cap = capacity(s);
-  const stuck = isStuck(s);
+  const sel = selectedCard(s, model.selectedId);
 
-  const handHTML = s.hand
-    ? cardHTML(s.hand, 'card--hand')
-    : '<div class="card card--empty card--hand"></div>';
+  const handCards = s.hand.length
+    ? s.hand
+        .map((c) => cardHTML(c, c.id === sel?.id ? 'is-selected' : ''))
+        .join('')
+    : '<div class="card card--empty"></div>';
+
+  const drawable = canDraw(s);
+  const noPlay = s.hand.length > 0 && !anyValidPlacement(s);
+  const hint = s.hand.length === 0
+    ? 'Draw a card with 🌱 seeds.'
+    : noPlay
+      ? 'No row fits — fold, draw, or discard.'
+      : 'Pick a card, then tap a row.';
 
   const suitLegend = (['livestock', 'grain', 'field', 'wild'] as const)
     .map((k) => `<span class="legend"><i>${SUIT_INFO[k].emoji}</i>${SUIT_INFO[k].label}</span>`)
@@ -72,6 +92,7 @@ export function boardHTML(model: RenderModel): string {
       <div class="brand"><span class="brand-mark">🌱</span> AGRITAIRE</div>
       <div class="hud">
         <div class="stat"><span>🏆</span><b>${s.score}</b></div>
+        <div class="stat stat--seed"><span>🌱</span><b>${s.seeds}</b></div>
         <div class="stat"><span>🌾</span><b>${s.grain}</b></div>
         <div class="stat"><span>🐄</span><b>${s.herd}/${cap}</b></div>
         <div class="stat stat--warn"><span>🗑</span><b>${s.spoiled}/${SPOIL_LIMIT}</b></div>
@@ -79,18 +100,21 @@ export function boardHTML(model: RenderModel): string {
     </header>
 
     <section class="hand-panel">
-      <div class="hand-slot">${handHTML}</div>
+      <div class="hand-cards" data-hand>${handCards}</div>
       <div class="hand-info">
-        <div class="hand-title">Turn ${s.turn} · ${s.deck.length} left in deck</div>
-        <div class="hand-sub ${stuck ? 'is-stuck' : ''}">
-          ${stuck ? 'No legal play — this card will spoil.' : 'Place this card on a row, or discard it.'}
+        <div class="hand-title">Turn ${s.turn} · ${s.deck.length} in deck · hand ${s.hand.length}/${HAND_MAX}</div>
+        <div class="hand-sub ${noPlay ? 'is-stuck' : ''}">${hint}</div>
+        <div class="hand-actions">
+          <button class="btn btn--seed" data-action="draw" type="button" ${drawable ? '' : 'disabled'}>
+            🌱 Draw <small>(−${DRAW_COST})</small>
+          </button>
+          <button class="btn btn--discard" data-action="discard" type="button" ${s.hand.length ? '' : 'disabled'}>🗑 Discard</button>
         </div>
-        <button class="btn btn--discard" data-action="discard" type="button">🗑 Discard (lose card)</button>
       </div>
     </section>
 
     <section class="rows">
-      ${Array.from({ length: s.rows.length }, (_, i) => rowHTML(s, i)).join('')}
+      ${Array.from({ length: s.rows.length }, (_, i) => rowHTML(s, i, sel)).join('')}
     </section>
 
     <footer class="controls">

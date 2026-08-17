@@ -14,13 +14,19 @@ A **turn-based**, sequential stacking game. Four suits:
 - 🟩 **Field** — the very sequential backbone; adds bonus points
 - ⭐ **Wildcard** — fills any slot in a run
 
+### Seeds & drawing
+
+- You start with a small **🌱 seed count**. Seeds **grow by one every turn** and are
+  **spent to draw cards** (−1 per draw) into your hand (up to 5).
+- Banking seeds lets you pull several cards at once for more placement options.
+
 ### How a turn works
 
-- Each turn you draw **one card** into your hand.
-- Place it on one of the **four rows**. Rows build **strictly ascending consecutive
-  runs** (each card must be exactly one rank higher than the row's top). A ⭐ wild
-  fills any slot.
-- If the card fits nowhere (or you choose), it **spoils** and is lost.
+- Draw cards with seeds, then **place a card** on one of the **four rows**. Rows build
+  **strictly ascending consecutive runs** (each card must be exactly one rank higher
+  than the row's top). A ⭐ wild fills any slot. Placing (or discarding) advances the
+  turn, so your seeds regrow.
+- If a card fits nowhere (or you choose), **discard** it — it **spoils** and is lost.
   Spoil too many (12) and the **farm fails**.
 
 ### Folding a set
@@ -36,9 +42,10 @@ field cards add bonus points. Surviving cattle pay a bonus when the deck runs ou
 
 ### Controls (touch + mouse)
 
-- **Tap a row** to place the current card there (valid rows glow green).
+- **🌱 Draw** spends a seed to add a card to your hand.
+- **Tap a held card** to select it, then **tap a row** to place it (valid rows glow green).
 - **🌾 / 🐄** buttons on a foldable row bank it as grain or cattle.
-- **🗑 Discard** loses the current card on purpose. **🌱 New Farm** reshuffles.
+- **🗑 Discard** loses the selected card on purpose. **🌱 New Farm** reshuffles.
 - Add `?seed=N` to the URL for a reproducible (shareable) deal.
 
 ## Development
