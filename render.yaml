@@ -1,10 +1,19 @@
+# Free-to-play static site. Point the Render service at this branch
+# (or merge PR #3) — main is still the old Chrome extension.
 services:
   - type: web
     name: agritaire
     runtime: static
-    buildCommand: npm ci && npm run build
-    staticPublishPath: dist
-    pullRequestPreviewsEnabled: true
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    staticPublishPath: ./dist
+    previews:
+      generation: automatic
+    envVars:
+      - key: NODE_VERSION
+        value: '20'
+      - key: SKIP_INSTALL_DEPS
+        value: 'true'
     routes:
       - type: rewrite
         source: /*
