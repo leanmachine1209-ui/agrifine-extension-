@@ -1,123 +1,73 @@
-// Card model for AGRITAIRE v7.
+// Card model for AGRITAIRE v8 — solitaire suits with Field starters.
 //
-// Placeable suits stack in vertically aligned columns. Three of the same
-// tier collapse into a bigger asset (wood barn → steel barn, compact
-// tractor → utility → combine). Expansion / Boom remain instant wildcards.
+// Four 14-card suits. Rank 1 is the Field that opens that suit's foundation.
+// Ranks 2–14 stack in order on that field. The holding set (tableau) builds
+// down in alternating families, like Klondike.
 
-export type Suit = 'field' | 'seed' | 'equipment' | 'livestock' | 'expansion' | 'boom';
-export type SeasonName = 'spring' | 'summer' | 'fall' | 'winter';
-export type Tier = 1 | 2 | 3;
+export type Suit = 'grain' | 'orchard' | 'livestock' | 'equipment';
+export type Family = 'gold' | 'rust';
 
 export interface SuitInfo {
   readonly suit: Suit;
   readonly emoji: string;
   readonly label: string;
+  readonly family: Family;
   readonly color: string;
 }
 
 export const SUIT_INFO: Record<Suit, SuitInfo> = {
-  field: { suit: 'field', emoji: '🏚️', label: 'Barns', color: 'field' },
-  seed: { suit: 'seed', emoji: '🌱', label: 'Crops', color: 'seed' },
-  equipment: { suit: 'equipment', emoji: '🚜', label: 'Tractors', color: 'equipment' },
-  livestock: { suit: 'livestock', emoji: '🐄', label: 'Cattle', color: 'livestock' },
-  expansion: { suit: 'expansion', emoji: '📐', label: 'Expansion', color: 'expansion' },
-  boom: { suit: 'boom', emoji: '💥', label: 'Boom', color: 'boom' },
+  grain: { suit: 'grain', emoji: '🌾', label: 'Grain', family: 'gold', color: 'grain' },
+  orchard: { suit: 'orchard', emoji: '🍎', label: 'Orchard', family: 'gold', color: 'orchard' },
+  livestock: { suit: 'livestock', emoji: '🐄', label: 'Cattle', family: 'rust', color: 'livestock' },
+  equipment: { suit: 'equipment', emoji: '🚜', label: 'Tractors', family: 'rust', color: 'equipment' },
 };
 
-export const PLACEABLE_SUITS = ['field', 'seed', 'equipment', 'livestock'] as const;
+export const SUITS: Suit[] = ['grain', 'orchard', 'livestock', 'equipment'];
 
-export interface AssetTier {
-  readonly tier: Tier;
-  readonly emoji: string;
-  readonly label: string;
-  readonly short: string;
-}
-
-export const SUIT_TIERS: Record<(typeof PLACEABLE_SUITS)[number], readonly AssetTier[]> = {
-  field: [
-    { tier: 1, emoji: '🏚️', label: 'Wood barn', short: 'Wood' },
-    { tier: 2, emoji: '🏭', label: 'Steel barn', short: 'Steel' },
-    { tier: 3, emoji: '🏢', label: 'Modern barn', short: 'Modern' },
-  ],
-  seed: [
-    { tier: 1, emoji: '🌱', label: 'Seedling', short: 'Seed' },
-    { tier: 2, emoji: '🌾', label: 'Standing crop', short: 'Crop' },
-    { tier: 3, emoji: '🌻', label: 'Bumper crop', short: 'Bumper' },
-  ],
-  equipment: [
-    { tier: 1, emoji: '🚜', label: 'Compact tractor', short: 'Small' },
-    { tier: 2, emoji: '🛻', label: 'Utility tractor', short: 'Utility' },
-    { tier: 3, emoji: '🚛', label: 'Combine', short: 'Combine' },
-  ],
-  livestock: [
-    { tier: 1, emoji: '🐄', label: 'Cow', short: 'Cow' },
-    { tier: 2, emoji: '🐂', label: 'Herd', short: 'Herd' },
-    { tier: 3, emoji: '🏞️', label: 'Feedlot', short: 'Lot' },
-  ],
-};
-
-export const SEASONS: SeasonName[] = ['spring', 'summer', 'fall', 'winter'];
-
-export const SEASON_INFO: Record<SeasonName, { emoji: string; label: string }> = {
-  spring: { emoji: '🌸', label: 'Spring' },
-  summer: { emoji: '☀️', label: 'Summer' },
-  fall: { emoji: '🍂', label: 'Fall' },
-  winter: { emoji: '❄️', label: 'Winter' },
-};
-
-export const FIELD_COUNT = 10;
-export const SEEDS_PER_SEASON = 3;
-export const EQUIPMENT_COUNT = 8;
-export const LIVESTOCK_COUNT = 8;
-export const EXPANSION_COUNT = 3;
-export const BOOM_COUNT = 4;
+export const RANK_MIN = 1;
+export const RANK_MAX = 14;
+export const FIELD_RANK = 1;
 
 export interface Card {
   readonly id: string;
   readonly suit: Suit;
-  readonly tier: Tier;
-  readonly season?: SeasonName; // seeds only
+  readonly rank: number;
+  faceUp: boolean;
 }
 
-export function isInstant(card: Card): boolean {
-  return card.suit === 'expansion' || card.suit === 'boom';
+export function familyOf(suit: Suit): Family {
+  return SUIT_INFO[suit].family;
 }
 
-export function isPlaceable(suit: Suit): suit is (typeof PLACEABLE_SUITS)[number] {
-  return (PLACEABLE_SUITS as readonly string[]).includes(suit);
+export function isFieldCard(card: Card): boolean {
+  return card.rank === FIELD_RANK;
 }
 
-export function assetTier(card: Card): AssetTier | null {
-  if (!isPlaceable(card.suit)) return null;
-  return SUIT_TIERS[card.suit][card.tier - 1] ?? SUIT_TIERS[card.suit][0];
+export function rankLabel(rank: number): string {
+  if (rank === 1) return 'F';
+  if (rank === 11) return 'J';
+  if (rank === 12) return 'Q';
+  if (rank === 13) return 'K';
+  if (rank === 14) return '★';
+  return String(rank);
 }
 
 export function cardLabel(card: Card): string {
-  if (card.suit === 'seed' && card.season && card.tier === 1) return SEASON_INFO[card.season].emoji;
-  const asset = assetTier(card);
-  if (asset) return asset.emoji;
-  return SUIT_INFO[card.suit].emoji;
+  const info = SUIT_INFO[card.suit];
+  if (card.rank === FIELD_RANK) return `${info.label} Field`;
+  if (card.rank === RANK_MAX) return `${info.label} Harvest`;
+  return `${info.label} ${rankLabel(card.rank)}`;
 }
 
-function ofSuit(suit: Suit, count: number, season?: SeasonName): Card[] {
-  return Array.from({ length: count }, (_, i) => ({
-    id: season ? `${suit}-${season}-${i + 1}` : `${suit}-${i + 1}`,
-    suit,
-    tier: 1 as Tier,
-    ...(season ? { season } : {}),
-  }));
-}
-
-/** Build the ordered deck (~45 cards). All dealt cards start at tier 1. */
+/** Ordered 56-card deck: 4 suits × ranks 1–14. */
 export function createDeck(): Card[] {
-  return [
-    ...ofSuit('field', FIELD_COUNT),
-    ...SEASONS.flatMap((season) => ofSuit('seed', SEEDS_PER_SEASON, season)),
-    ...ofSuit('equipment', EQUIPMENT_COUNT),
-    ...ofSuit('livestock', LIVESTOCK_COUNT),
-    ...ofSuit('expansion', EXPANSION_COUNT),
-    ...ofSuit('boom', BOOM_COUNT),
-  ];
+  const deck: Card[] = [];
+  for (const suit of SUITS) {
+    for (let rank = RANK_MIN; rank <= RANK_MAX; rank++) {
+      deck.push({ id: `${suit}-${rank}`, suit, rank, faceUp: false });
+    }
+  }
+  return deck;
 }
 
 /** Deterministic PRNG (mulberry32) so games can be seeded/reproduced. */

@@ -1,411 +1,281 @@
-// AGRITAIRE rules engine (v7) — vertically aligned suits, collapsing assets.
+// AGRITAIRE rules — solitaire holding set + 14-card field stacks.
 //
-// Four suit columns (Barns / Crops / Tractors / Cattle) stack top-to-bottom.
-// Three of the same tier collapse into the next asset: wood barn → steel barn
-// → modern barn, compact tractor → utility → combine. Bigger barns hold more
-// cattle; bigger tractors lift harvest. Capital assets burn 🌱 tokens each
-// operating loan — twice as hard when no crops or cattle are paying for them.
-//
-// Mini-decks, temperature-gated seeds, Expansion/Boom, Grain Bank, and the
-// living herd stay from v6.
+// Fields (foundations) start empty. A Field card (rank 1) sets the plot;
+// the rest of that 14-card suit stacks in order. The holding set is a
+// 7-pile Klondike tableau: build down, alternating gold/rust families.
 
 import {
   Card,
   Suit,
-  SeasonName,
-  Tier,
-  SEASONS,
-  PLACEABLE_SUITS,
+  SUITS,
+  RANK_MAX,
+  FIELD_RANK,
+  familyOf,
   createDeck,
   shuffle,
   mulberry32,
-  isInstant,
-  isPlaceable,
 } from './cards';
 
-export const COLUMN_COUNT = 4;
-export const COLUMN_CAP = 6;
-export const MERGE_COUNT = 3;
-export const MAX_TIER = 3;
+export const HOLDING_PILES = 7;
 
-export const CATTLE_LIFESPAN = 3;
-export const FEED_PER_CATTLE = 1;
-export const CATTLE_CASHOUT = 8;
-export const HERD_END_BONUS = 4;
-export const BASE_CATTLE_CAP = 2;
-
-export const MINI_DECK_SIZE = 5;
-export const SEEDS_START = 5;
-export const MINI_DECK_COST = 2;
-export const SELL_VALUE = 1;
-export const INSTANT_SELL_VALUE = 2;
-export const HARVEST_SEED_YIELD = 2;
-export const BOOM_GRAIN_MAX = 6;
-
-/** Cattle slots (barns) / harvest lift (tractors) by asset tier. */
-export const TIER_CAPACITY: Record<Tier, number> = { 1: 1, 2: 3, 3: 6 };
-
-/** Token burn per capital asset per loan. Idle (unpaid) assets pay double. */
-export const TIER_BURN: Record<Tier, number> = { 1: 1, 2: 2, 3: 4 };
-
-export type FoldMode = 'grain' | 'cattle';
-export type BoomChoice = 'grain' | 'cow';
-
-export interface Column {
-  /** Locked suit. `null` = Expansion extra, locks on the first card played. */
-  suit: Suit | null;
-  cards: Card[];
-}
-
-export interface Cattle {
-  id: string;
-  life: number;
-}
-
-export interface BurnReport {
-  barns: number;
-  tractors: number;
-  idleBarns: boolean;
-  idleTractors: boolean;
-  total: number;
-}
+export type PileRef =
+  | { type: 'stock' }
+  | { type: 'waste' }
+  | { type: 'field'; suit: Suit }
+  | { type: 'hold'; index: number };
 
 export interface GameState {
-  deck: Card[];
-  hand: Card[];
-  seeds: number;
-  columns: Column[];
-  grain: number;
-  herd: Cattle[];
+  stock: Card[];
+  waste: Card[];
+  fields: Record<Suit, Card[]>;
+  holding: Card[][];
+  moves: number;
   score: number;
-  season: number;
-  sold: number;
-  cattleCashed: number;
-  cattleStarved: number;
-  nextCow: number;
-  nextMerge: number;
-  tokensBurned: number;
-  over: boolean;
-  failed: boolean;
-  rng: () => number;
+  recycled: number;
 }
 
-function startingColumns(): Column[] {
-  return PLACEABLE_SUITS.map((suit) => ({ suit, cards: [] }));
+export const SCORE_PER_FIELD_CARD = 10;
+export const SCORE_SUIT_BONUS = 100;
+
+export function emptyFields(): Record<Suit, Card[]> {
+  return { grain: [], orchard: [], livestock: [], equipment: [] };
 }
 
-function drawInto(state: GameState, n: number): void {
-  for (let i = 0; i < n && state.deck.length > 0; i++) {
-    state.hand.push(state.deck.pop()!);
+export function deal(deck: Card[]): GameState {
+  const holding: Card[][] = Array.from({ length: HOLDING_PILES }, () => []);
+  for (let col = 0; col < HOLDING_PILES; col++) {
+    for (let row = 0; row <= col; row++) {
+      const card = deck.pop()!;
+      card.faceUp = row === col;
+      holding[col].push(card);
+    }
   }
-}
-
-export function currentSeason(seasonNumber: number): SeasonName {
-  return SEASONS[(seasonNumber - 1 + SEASONS.length * 8) % SEASONS.length];
+  const stock = deck.splice(0, deck.length);
+  stock.forEach((card) => {
+    card.faceUp = false;
+  });
+  return {
+    stock,
+    waste: [],
+    fields: emptyFields(),
+    holding,
+    moves: 0,
+    score: 0,
+    recycled: 0,
+  };
 }
 
 export function newGame(seed?: number): GameState {
   const rng = seed === undefined ? Math.random : mulberry32(seed);
-  const state: GameState = {
-    deck: shuffle(createDeck(), rng),
-    hand: [],
-    seeds: SEEDS_START,
-    columns: startingColumns(),
-    grain: 0,
-    herd: [],
-    score: 0,
-    season: 1,
-    sold: 0,
-    cattleCashed: 0,
-    cattleStarved: 0,
-    nextCow: 0,
-    nextMerge: 0,
-    tokensBurned: 0,
-    over: false,
-    failed: false,
-    rng,
-  };
-  drawInto(state, MINI_DECK_SIZE);
-  return state;
+  return deal(shuffle(createDeck(), rng));
 }
 
 export function cloneState(state: GameState): GameState {
-  const copy = structuredClone(state) as GameState;
-  copy.rng = state.rng;
-  return copy;
+  return structuredClone(state);
 }
 
-function cardsOfSuit(state: GameState, suit: Suit): Card[] {
-  return state.columns.filter((col) => col.suit === suit).flatMap((col) => col.cards);
+function findCard(state: GameState, cardId: string): { ref: PileRef; index: number } | null {
+  const wasteIndex = state.waste.findIndex((card) => card.id === cardId);
+  if (wasteIndex !== -1) return { ref: { type: 'waste' }, index: wasteIndex };
+
+  for (const suit of SUITS) {
+    const fieldIndex = state.fields[suit].findIndex((card) => card.id === cardId);
+    if (fieldIndex !== -1) return { ref: { type: 'field', suit }, index: fieldIndex };
+  }
+
+  for (let i = 0; i < state.holding.length; i++) {
+    const holdIndex = state.holding[i].findIndex((card) => card.id === cardId);
+    if (holdIndex !== -1) return { ref: { type: 'hold', index: i }, index: holdIndex };
+  }
+  return null;
 }
 
-function sumTable(cards: Card[], table: Record<Tier, number>): number {
-  return cards.reduce((n, card) => n + table[card.tier], 0);
+function pileArray(state: GameState, ref: PileRef): Card[] {
+  switch (ref.type) {
+    case 'stock':
+      return state.stock;
+    case 'waste':
+      return state.waste;
+    case 'field':
+      return state.fields[ref.suit];
+    case 'hold':
+      return state.holding[ref.index];
+  }
 }
 
-export function barnCapacity(state: GameState): number {
-  return BASE_CATTLE_CAP + sumTable(cardsOfSuit(state, 'field'), TIER_CAPACITY);
+export function topOf(cards: Card[]): Card | undefined {
+  return cards[cards.length - 1];
 }
 
-export function tractorPower(state: GameState): number {
-  return sumTable(cardsOfSuit(state, 'equipment'), TIER_CAPACITY);
+export function canPlaceOnField(card: Card, field: Card[]): boolean {
+  if (field.length === 0) return card.rank === FIELD_RANK;
+  const top = topOf(field);
+  return Boolean(top && top.suit === card.suit && card.rank === top.rank + 1);
 }
 
-export function cattlePaying(state: GameState): boolean {
-  return state.herd.length > 0 || cardsOfSuit(state, 'livestock').length > 0;
+export function canStackOnHold(card: Card, destTop: Card | undefined): boolean {
+  if (!destTop) return card.rank === RANK_MAX;
+  return familyOf(card.suit) !== familyOf(destTop.suit) && card.rank === destTop.rank - 1;
 }
 
-export function cropsPaying(state: GameState): boolean {
-  return state.grain > 0 || cardsOfSuit(state, 'seed').length > 0;
+export function isValidRun(cards: Card[]): boolean {
+  if (cards.length === 0 || cards.some((card) => !card.faceUp)) return false;
+  for (let i = 1; i < cards.length; i++) {
+    const prev = cards[i - 1];
+    const next = cards[i];
+    if (familyOf(prev.suit) === familyOf(next.suit)) return false;
+    if (next.rank !== prev.rank - 1) return false;
+  }
+  return true;
 }
 
-/** Token burn for barns + tractors this loan. Idle capital pays double. */
-export function capitalBurn(state: GameState): BurnReport {
-  const barnBase = sumTable(cardsOfSuit(state, 'field'), TIER_BURN);
-  const tractorBase = sumTable(cardsOfSuit(state, 'equipment'), TIER_BURN);
-  const idleBarns = barnBase > 0 && !cattlePaying(state);
-  const idleTractors = tractorBase > 0 && !cropsPaying(state);
-  const barns = idleBarns ? barnBase * 2 : barnBase;
-  const tractors = idleTractors ? tractorBase * 2 : tractorBase;
-  return { barns, tractors, idleBarns, idleTractors, total: barns + tractors };
+function samePile(a: PileRef, b: PileRef): boolean {
+  if (a.type !== b.type) return false;
+  if (a.type === 'hold' && b.type === 'hold') return a.index === b.index;
+  if (a.type === 'field' && b.type === 'field') return a.suit === b.suit;
+  return true;
 }
 
-export function loanCost(state: GameState): number {
-  return MINI_DECK_COST + capitalBurn(state).total;
+function flipExposed(state: GameState, ref: PileRef): void {
+  if (ref.type !== 'hold') return;
+  const top = topOf(state.holding[ref.index]);
+  if (top && !top.faceUp) top.faceUp = true;
 }
 
-export function canFold(col: Column, mode: FoldMode): boolean {
-  if (col.cards.length === 0) return false;
-  if (mode === 'grain') return col.suit === 'seed';
-  return col.suit === 'livestock';
+export function getMovableCards(state: GameState, cardId: string): Card[] | null {
+  const located = findCard(state, cardId);
+  if (!located) return null;
+  const { ref, index } = located;
+  if (ref.type === 'stock') return null;
+  const arr = pileArray(state, ref);
+  if (ref.type === 'hold') {
+    const run = arr.slice(index);
+    return isValidRun(run) ? run : null;
+  }
+  if (index !== arr.length - 1) return null;
+  return arr[index].faceUp ? [arr[index]] : null;
 }
 
-export function canPlace(card: Card, col: Column, season: SeasonName): boolean {
-  if (isInstant(card)) return false;
-  if (card.suit === 'seed' && card.season !== season) return false;
-  if (col.suit === null && col.cards.length === 0) return isPlaceable(card.suit);
-  return col.suit === card.suit;
-}
-
-export function anyValidPlacement(state: GameState): boolean {
-  const season = currentSeason(state.season);
-  return state.hand.some(
-    (card) =>
-      (card.suit === 'expansion' && state.columns.length < COLUMN_CAP) ||
-      card.suit === 'boom' ||
-      state.columns.some((col) => canPlace(card, col, season)),
-  );
-}
-
-export function feedCost(state: GameState): number {
-  return state.herd.length * FEED_PER_CATTLE;
-}
-
-export function collapseColumn(col: Column, nextId: () => string): void {
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (let i = 0; i <= col.cards.length - MERGE_COUNT; i++) {
-      const slice = col.cards.slice(i, i + MERGE_COUNT);
-      const tier = slice[0].tier;
-      if (tier >= MAX_TIER) continue;
-      if (!slice.every((c) => c.tier === tier && c.suit === slice[0].suit)) continue;
-      const merged: Card = {
-        id: nextId(),
-        suit: slice[0].suit,
-        tier: (tier + 1) as Tier,
-      };
-      col.cards.splice(i, MERGE_COUNT, merged);
-      if (col.suit === null) col.suit = merged.suit;
-      changed = true;
-      break;
+export function validTargets(state: GameState, cardId: string): PileRef[] {
+  const moving = getMovableCards(state, cardId);
+  if (!moving) return [];
+  const targets: PileRef[] = [];
+  if (moving.length === 1 && canPlaceOnField(moving[0], state.fields[moving[0].suit])) {
+    targets.push({ type: 'field', suit: moving[0].suit });
+  }
+  for (let i = 0; i < state.holding.length; i++) {
+    if (canStackOnHold(moving[0], topOf(state.holding[i]))) {
+      targets.push({ type: 'hold', index: i });
     }
   }
+  return targets;
 }
 
-function mergeId(state: GameState): string {
-  return `merge-${state.nextMerge++}`;
+function canMoveTo(state: GameState, moving: Card[], dest: PileRef): boolean {
+  if (dest.type === 'stock' || dest.type === 'waste') return false;
+  if (dest.type === 'field') {
+    return moving.length === 1 && dest.suit === moving[0].suit && canPlaceOnField(moving[0], state.fields[dest.suit]);
+  }
+  return canStackOnHold(moving[0], topOf(state.holding[dest.index]));
 }
 
-export function sellValue(card: Card): number {
-  return isInstant(card) ? INSTANT_SELL_VALUE : SELL_VALUE;
-}
+export function moveCards(state: GameState, cardId: string, dest: PileRef): boolean {
+  const located = findCard(state, cardId);
+  if (!located) return false;
+  if (samePile(located.ref, dest)) return false;
+  const moving = getMovableCards(state, cardId);
+  if (!moving) return false;
+  if (!canMoveTo(state, moving, dest)) return false;
 
-export function canDrawMiniDeck(state: GameState): boolean {
-  return (
-    !state.over &&
-    state.hand.length === 0 &&
-    state.deck.length > 0 &&
-    state.seeds >= loanCost(state)
-  );
-}
+  const source = pileArray(state, located.ref);
+  source.splice(located.index, moving.length);
+  pileArray(state, dest).push(...moving);
+  flipExposed(state, located.ref);
 
-export function enforceCapacity(state: GameState): void {
-  const cap = barnCapacity(state);
-  if (state.herd.length <= cap) return;
-  state.herd.sort((a, b) => a.life - b.life);
-  const extra = state.herd.length - cap;
-  state.cattleStarved += extra;
-  state.herd = state.herd.slice(extra);
-}
-
-export function advanceHerd(state: GameState): void {
-  enforceCapacity(state);
-  if (state.herd.length === 0) return;
-
-  const need = feedCost(state);
-  if (state.grain >= need) {
-    state.grain -= need;
-  } else {
-    const fed = Math.floor(state.grain / FEED_PER_CATTLE);
-    state.grain -= fed * FEED_PER_CATTLE;
-    state.herd.sort((a, b) => a.life - b.life);
-    state.cattleStarved += state.herd.length - fed;
-    state.herd = state.herd.slice(0, fed);
+  if (dest.type === 'field') {
+    state.score += SCORE_PER_FIELD_CARD;
+    if (state.fields[dest.suit].length === RANK_MAX) state.score += SCORE_SUIT_BONUS;
   }
 
-  const survivors: Cattle[] = [];
-  for (const cow of state.herd) {
-    cow.life -= 1;
-    if (cow.life <= 0) {
-      state.score += CATTLE_CASHOUT;
-      state.cattleCashed++;
-    } else {
-      survivors.push(cow);
+  state.moves++;
+  return true;
+}
+
+export function sendToField(state: GameState, cardId: string): boolean {
+  const located = findCard(state, cardId);
+  if (!located) return false;
+  const arr = pileArray(state, located.ref);
+  const card = arr[located.index];
+  if (!card) return false;
+  return moveCards(state, cardId, { type: 'field', suit: card.suit });
+}
+
+export function drawFromStock(state: GameState): boolean {
+  if (state.stock.length > 0) {
+    const card = state.stock.pop()!;
+    card.faceUp = true;
+    state.waste.push(card);
+    state.moves++;
+    return true;
+  }
+  if (state.waste.length > 0) {
+    while (state.waste.length > 0) {
+      const card = state.waste.pop()!;
+      card.faceUp = false;
+      state.stock.push(card);
+    }
+    state.recycled++;
+    state.moves++;
+    return true;
+  }
+  return false;
+}
+
+export function autoPlayFields(state: GameState): number {
+  let moved = 0;
+  let progress = true;
+  while (progress) {
+    progress = false;
+    const ids: string[] = [];
+    const wasteTop = topOf(state.waste);
+    if (wasteTop) ids.push(wasteTop.id);
+    for (const pile of state.holding) {
+      const top = topOf(pile);
+      if (top?.faceUp) ids.push(top.id);
+    }
+    for (const id of ids) {
+      if (sendToField(state, id)) {
+        moved++;
+        progress = true;
+      }
     }
   }
-  state.herd = survivors;
-}
-
-function chargeCapitalBurn(state: GameState): void {
-  const burn = capitalBurn(state).total;
-  if (burn <= 0) return;
-  state.seeds -= burn;
-  state.tokensBurned += burn;
-}
-
-export function drawMiniDeck(state: GameState): boolean {
-  if (!canDrawMiniDeck(state)) return false;
-  chargeCapitalBurn(state);
-  state.seeds -= MINI_DECK_COST;
-  state.season++;
-  advanceHerd(state);
-  drawInto(state, MINI_DECK_SIZE);
-  return true;
-}
-
-function finish(state: GameState, failed: boolean): void {
-  if (state.over) return;
-  state.over = true;
-  state.failed = failed;
-  if (!failed) state.score += state.herd.length * HERD_END_BONUS;
-}
-
-function settleHand(state: GameState): void {
-  if (state.over || state.hand.length > 0) return;
-  if (state.deck.length === 0) {
-    finish(state, false);
-  } else if (state.seeds < loanCost(state)) {
-    finish(state, true);
-  }
-}
-
-function handIndex(state: GameState, cardId: string): number {
-  return state.hand.findIndex((c) => c.id === cardId);
-}
-
-function takeFromHand(state: GameState, cardId: string): Card | null {
-  const idx = handIndex(state, cardId);
-  if (idx < 0) return null;
-  const [card] = state.hand.splice(idx, 1);
-  return card;
-}
-
-export function placeFromHand(state: GameState, cardId: string, columnIndex: number): boolean {
-  if (state.over) return false;
-  const idx = handIndex(state, cardId);
-  if (idx < 0) return false;
-  const col = state.columns[columnIndex];
-  if (!col) return false;
-  const card = state.hand[idx];
-  if (!canPlace(card, col, currentSeason(state.season))) return false;
-  col.cards.push(card);
-  if (col.suit === null) col.suit = card.suit;
-  state.hand.splice(idx, 1);
-  collapseColumn(col, () => mergeId(state));
-  settleHand(state);
-  return true;
-}
-
-export function sellCard(state: GameState, cardId: string): boolean {
-  if (state.over) return false;
-  const idx = handIndex(state, cardId);
-  if (idx < 0) return false;
-  state.seeds += sellValue(state.hand[idx]);
-  state.sold++;
-  state.hand.splice(idx, 1);
-  settleHand(state);
-  return true;
-}
-
-export function playExpansion(state: GameState, cardId: string): boolean {
-  if (state.over) return false;
-  const idx = handIndex(state, cardId);
-  if (idx < 0) return false;
-  if (state.hand[idx].suit !== 'expansion') return false;
-  if (state.columns.length >= COLUMN_CAP) return false;
-  takeFromHand(state, cardId);
-  state.columns.push({ suit: null, cards: [] });
-  settleHand(state);
-  return true;
-}
-
-export function playBoom(state: GameState, cardId: string, choice: BoomChoice): boolean {
-  if (state.over) return false;
-  const idx = handIndex(state, cardId);
-  if (idx < 0) return false;
-  if (state.hand[idx].suit !== 'boom') return false;
-  takeFromHand(state, cardId);
-  if (choice === 'grain') {
-    state.grain += 1 + Math.floor(state.rng() * BOOM_GRAIN_MAX);
-  } else {
-    state.herd.push({ id: `cow-${state.nextCow++}`, life: CATTLE_LIFESPAN });
-    enforceCapacity(state);
-  }
-  settleHand(state);
-  return true;
-}
-
-export function foldColumn(state: GameState, columnIndex: number, mode: FoldMode): boolean {
-  if (state.over) return false;
-  const col = state.columns[columnIndex];
-  if (!col || !canFold(col, mode)) return false;
-
-  const value = col.cards.reduce((n, card) => n + card.tier, 0);
-
-  if (mode === 'grain') {
-    state.grain += value + tractorPower(state);
-    state.seeds += HARVEST_SEED_YIELD;
-    state.score += value;
-  } else {
-    const room = Math.max(0, barnCapacity(state) - state.herd.length);
-    const added = Math.min(value, room);
-    const overflow = value - added;
-    for (let i = 0; i < added; i++) {
-      state.herd.push({ id: `cow-${state.nextCow++}`, life: CATTLE_LIFESPAN });
-    }
-    state.cattleStarved += overflow;
-    state.score += added;
-  }
-
-  col.cards = [];
-  return true;
+  return moved;
 }
 
 export function isWon(state: GameState): boolean {
-  return state.over && !state.failed;
+  return SUITS.every((suit) => state.fields[suit].length === RANK_MAX);
 }
 
-export function cardsRemaining(state: GameState): number {
-  return state.deck.length + state.hand.length;
+export function fieldProgress(state: GameState): number {
+  const placed = SUITS.reduce((sum, suit) => sum + state.fields[suit].length, 0);
+  return placed / (SUITS.length * RANK_MAX);
+}
+
+export function suitsCompleted(state: GameState): number {
+  return SUITS.filter((suit) => state.fields[suit].length === RANK_MAX).length;
+}
+
+export function cardsInPlay(state: GameState): number {
+  return (
+    state.stock.length +
+    state.waste.length +
+    state.holding.reduce((n, pile) => n + pile.length, 0)
+  );
+}
+
+export function targetKey(ref: PileRef): string {
+  if (ref.type === 'field') return `field:${ref.suit}`;
+  if (ref.type === 'hold') return `hold:${ref.index}`;
+  return ref.type;
 }
