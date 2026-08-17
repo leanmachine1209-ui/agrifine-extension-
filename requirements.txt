@@ -1,0 +1,4 @@
+# Render's default Python Web Service build command is:
+#   pip install -r requirements.txt
+# AGRITAIRE is a Vite + TypeScript game. Gunicorn only serves the built dist/.
+gunicorn==23.0.0
