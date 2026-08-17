@@ -97,7 +97,9 @@ npm run preview  # serve the production build
 AGRITAIRE is a Vite + TypeScript game. If you created a **Python Web Service**
 (Render's default language), the build command is `pip install -r requirements.txt`.
 This repo includes that file plus a small Gunicorn app (`your_application.wsgi`)
-that serves `dist/`.
+that serves the committed game files in `your_application/static/` (a copy of
+`dist/`). That is what makes a Python-only deploy actually load — Render's
+default build never runs Vite, so `dist/` is empty on the server.
 
 ### Already created a Python Web Service?
 
@@ -106,9 +108,10 @@ Keep the dashboard defaults. After this lands on the deployed branch:
 - **Build command:** `pip install -r requirements.txt`
 - **Start command:** `gunicorn your_application.wsgi`
 
-Gunicorn binds `0.0.0.0:$PORT` via `gunicorn.conf.py`. If `dist/` is missing at
-boot and Node is available, the app runs `npm ci --include=dev && npm run build`.
-To build during deploy instead of boot, change the build command to:
+Gunicorn binds `0.0.0.0:$PORT` via `gunicorn.conf.py` and serves
+`your_application/static/` immediately (no npm at boot). To refresh that
+folder after game changes, run `npm run build` and commit the updated static
+files. Optional deploy-time build:
 
 ```bash
 pip install -r requirements.txt && npm ci --include=dev && npm run build
@@ -131,7 +134,8 @@ free to play at the `onrender.com` URL.
 
 ```
 requirements.txt            # Render Python build (`pip install -r requirements.txt`)
-your_application/wsgi.py    # `gunicorn your_application.wsgi` serves dist/
+your_application/wsgi.py    # `gunicorn your_application.wsgi` serves static/
+your_application/static/    # committed Vite build so Python deploys can load
 src/
   game/
     cards.ts        # suits, asset tiers, seasons, deck, seeded shuffle
