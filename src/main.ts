@@ -8,6 +8,7 @@ import {
   drawFromStock,
   sendToField,
   autoPlayFields,
+  developAfterMove,
   isWon,
 } from './game/rules';
 import { boardHTML, overOverlayHTML, RenderModel } from './ui/render';
@@ -55,11 +56,12 @@ export class Agritaire {
         case 'select':
           if (!id) break;
           if (this.selectedId === id) {
-            sendToField(this.state, id);
+            if (sendToField(this.state, id)) developAfterMove(this.state);
             this.selectedId = null;
             break;
           }
           if (this.selectedId && sendToField(this.state, this.selectedId)) {
+            developAfterMove(this.state);
             this.selectedId = null;
             break;
           }
@@ -68,16 +70,19 @@ export class Agritaire {
         case 'drop': {
           const dest = destFromEl(el);
           if (dest && this.selectedId && moveCards(this.state, this.selectedId, dest)) {
+            developAfterMove(this.state);
             this.selectedId = null;
           }
           break;
         }
         case 'draw':
           drawFromStock(this.state);
+          developAfterMove(this.state);
           this.selectedId = null;
           break;
         case 'auto':
           autoPlayFields(this.state);
+          developAfterMove(this.state);
           this.selectedId = null;
           break;
         case 'new':

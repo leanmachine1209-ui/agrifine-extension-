@@ -5,8 +5,13 @@ import {
   topOf,
   validTargets,
   targetKey,
-  fieldProgress,
-  suitsCompleted,
+  fieldTenure,
+  ownedFarms,
+  leasedFields,
+  canRecallFromLease,
+  hasYard,
+  hasCrew,
+  advise,
   isWon,
 } from '../game/rules';
 
@@ -45,19 +50,23 @@ function cardHTML(card: Card, opts: { selected?: boolean; action?: string; burie
     </button>`;
 }
 
-function fieldHTML(state: GameState, suit: Suit, valid: Set<string>): string {
+function fieldHTML(state: GameState, suit: Suit, valid: Set<string>, selectedId: string | null): string {
   const pile = state.fields[suit];
   const info = SUIT_INFO[suit];
   const top = topOf(pile);
+  const tenure = fieldTenure(pile);
   const key = targetKey({ type: 'field', suit });
   const validCls = valid.has(key) ? ' is-valid' : '';
-  const done = pile.length === RANK_MAX ? ' is-done' : '';
+  const tenureCls = ` is-${tenure}`;
+  const recall = tenure === 'leased' && canRecallFromLease(state);
+  const label =
+    tenure === 'owned' ? 'Owned farm' : tenure === 'leased' ? `Leased ${pile.length}/${RANK_MAX}` : 'Vacant · lease with F';
   const body = top
-    ? cardHTML(top, { action: 'noop' })
-    : `<div class="slot-empty">${info.emoji}<small>Field</small></div>`;
+    ? cardHTML(top, { action: recall ? 'select' : 'noop', selected: top.id === selectedId })
+    : `<div class="slot-empty">${info.emoji}<small>Lease</small></div>`;
   return `
-    <article class="field-slot field-slot--${info.color}${validCls}${done}" ${pileAttr({ type: 'field', suit })} data-action="drop">
-      <header class="slot-head">${info.emoji} ${info.label} <b>${pile.length}/${RANK_MAX}</b></header>
+    <article class="field-slot field-slot--${info.color}${validCls}${tenureCls}" ${pileAttr({ type: 'field', suit })} data-action="drop">
+      <header class="slot-head">${info.emoji} ${info.label} <b>${label}</b></header>
       ${body}
     </article>`;
 }
@@ -87,8 +96,9 @@ export function boardHTML(model: RenderModel): string {
   const s = model.state;
   const valid = new Set(model.selectedId ? validTargets(s, model.selectedId).map(targetKey) : []);
   const wasteTop = topOf(s.waste);
-  const progress = Math.round(fieldProgress(s) * 100);
-  const done = suitsCompleted(s);
+  const owned = ownedFarms(s);
+  const leased = leasedFields(s);
+  const tip = advise(s);
 
   const stockFace =
     s.stock.length > 0
@@ -103,9 +113,9 @@ export function boardHTML(model: RenderModel): string {
 
   const hint = model.selectedId
     ? valid.size
-      ? 'Tap a glowing Field or holding pile to play the card.'
+      ? 'Tap a glowing lease or holding pile. Prefer a move that flips a buried card.'
       : 'That card has nowhere to go — pick another, or draw.'
-    : 'Tap a face-up card, then a Field (start with F) or a holding pile.';
+    : tip.text;
 
   return `
   <div class="game">
@@ -114,7 +124,7 @@ export function boardHTML(model: RenderModel): string {
       <div class="hud">
         <div class="stat"><span>🏆</span><b>${s.score}</b></div>
         <div class="stat"><span>🃏</span><b>${s.moves}</b></div>
-        <div class="stat"><span>📐</span><b>${done}/4</b></div>
+        <div class="stat"><span>🏡</span><b>${owned}/4</b></div>
       </div>
     </header>
 
@@ -128,14 +138,24 @@ export function boardHTML(model: RenderModel): string {
         ${wasteFace}
       </div>
       <div class="stock-box stock-box--progress">
-        <div class="bank-label">Fields set</div>
-        <div class="bank-value">${progress}%</div>
-        <p class="season-copy">Play a <b>F</b> Field to open a plot, then stack that 14-card suit in order.</p>
+        <div class="bank-label">Farms owned · ${leased} leased</div>
+        <div class="bank-value">${owned}/4</div>
+        <p class="season-copy">
+          ${owned === 0
+            ? 'Lease with <b>F</b>. Finish the 14-card suit to own the farm.'
+            : owned === 1
+              ? 'Deed #1: recall a card from a lease when you need a builder.'
+              : owned === 2
+                ? 'Deed #2: extra yard unlocked. Keep flipping buried cards.'
+                : owned === 3
+                  ? 'Deed #3: the crew plays F and 2s for you.'
+                  : 'All four farms are yours.'}
+        </p>
       </div>
     </section>
 
     <section class="fields-row" aria-label="Fields">
-      ${SUITS.map((suit) => fieldHTML(s, suit, valid)).join('')}
+      ${SUITS.map((suit) => fieldHTML(s, suit, valid, model.selectedId)).join('')}
     </section>
 
     <p class="upkeep">${hint}</p>
@@ -150,10 +170,10 @@ export function boardHTML(model: RenderModel): string {
     <footer class="controls">
       <div class="legend-row">
         ${SUITS.map((suit) => `<span class="legend"><i>${SUIT_INFO[suit].emoji}</i>${SUIT_INFO[suit].label}</span>`).join('')}
-        <span class="legend">F = Field · ★ = Harvest</span>
+        <span class="legend">F leases · ★ Harvest · ${hasYard(s) ? 'Yard open' : '7 holds'}${hasCrew(s) ? ' · Crew on' : ''}</span>
       </div>
       <div class="hand-actions">
-        <button class="btn" data-action="auto" type="button">🌾 Auto-set Fields</button>
+        <button class="btn" data-action="auto" type="button">🌾 Play F &amp; 2s</button>
         <button class="btn btn--primary" data-action="new" type="button">🌱 New Farm</button>
       </div>
     </footer>
@@ -166,8 +186,8 @@ export function overOverlayHTML(state: GameState): string {
   <div class="overlay" data-overlay>
     <div class="overlay-card">
       <div class="overlay-emoji">🌾🐄🏆</div>
-      <h2>All four fields harvested!</h2>
-      <p>You stacked every 14-card suit on its Field.</p>
+      <h2>You own all four farms!</h2>
+      <p>Every leased field is now a deed — the late-game county is yours.</p>
       <div class="overlay-stats">
         <div><span>🏆 Score</span><b>${state.score}</b></div>
         <div><span>🃏 Moves</span><b>${state.moves}</b></div>

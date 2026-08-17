@@ -1,21 +1,30 @@
 # 🌱 AGRITAIRE
 
-A farming-simulator twist on **solitaire**. Set a **Field** (`F`) to open a
-plot, then stack that **14-card suit** in order. Cards you cannot play yet
-sit in a **holding set** (seven tableau piles). Mobile-first web game built
-with **Vite + TypeScript** (no engine, DOM-rendered).
+A farming-simulator twist on **Klondike solitaire**. **Lease** a Field (`F`),
+stack that **14-card suit**, and **own the farm** when the suit is complete.
+Late-game deeds unlock recall, an extra yard, and a crew that plays Aces and
+twos. Mobile-first web game built with **Vite + TypeScript**.
 
 ## Gameplay
 
-The deal is Klondike-shaped: **7 holding piles** (1 through 7 cards, top
-face-up) plus a **stock**. You always have cards to play — selling is gone.
+The deal is Klondike: **7 holding piles** (1 through 7, top face-up) plus a
+**stock**. Play follows optimal Klondike — flip buried cards first, put Aces
+and twos up, and do not empty a pile unless a Harvest (`★`) can fill it.
 
-### Field cards open a 14-card suit
+### Lease a field, own a farm
 
-Each suit is 14 ranks. **Rank 1 is the Field** (`F`). An empty field only
-accepts that Field card. After the plot is set, stack **2 → 3 → … → ★**
-(Harvest) of the **same suit**. You are building the whole suit, not merging
-three identical cards.
+Each suit is 14 ranks. **Rank 1 is the Field** (`F`). Playing it **leases**
+that plot. Stack **2 → ★** of the same suit. When the 14th card lands, the
+lease becomes an **owned farm** — that is the late-game engine.
+
+| Owned farms | Unlock |
+| --- | --- |
+| 1 | **Recall** — pull the top card off a *leased* field when you need a builder (standard Klondike “play off the foundation”). |
+| 2 | **Yard** — an 8th holding pile for late-game maneuvering. |
+| 3 | **Crew** — F and 2s auto-play after every move (they almost never help the tableau). |
+| 4 | You own the county. |
+
+### 14-card suits
 
 | Suit | Family | Emoji |
 | --- | --- | --- |
@@ -40,7 +49,7 @@ Field or a holding pile. When the stock is empty, tap ♻️ to recycle the wast
 
 - **Tap a face-up card**, then a **glowing Field or hold pile**.
 - **Tap a selected card again** to send it to its Field if that is legal.
-- **🌾 Auto-set Fields** walks every ready card onto its plot.
+- **🌾 Play F & 2s** only promotes safe cards (Aces, twos, then ranks whose opposite-family cards below are already up). Do not dump the whole suit early.
 - **🌱 New Farm** reshuffles. Add `?seed=N` for a reproducible deal.
 
 ## Development

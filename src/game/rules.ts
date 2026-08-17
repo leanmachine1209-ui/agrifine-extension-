@@ -1,8 +1,8 @@
-// AGRITAIRE rules — solitaire holding set + 14-card field stacks.
+// AGRITAIRE rules — Klondike holding set + leased fields that become farms.
 //
-// Fields (foundations) start empty. A Field card (rank 1) sets the plot;
-// the rest of that 14-card suit stacks in order. The holding set is a
-// 7-pile Klondike tableau: build down, alternating gold/rust families.
+// Playing a Field (rank 1) leases that plot. Completing the 14-card suit
+// (F → ★) owns the farm and unlocks late-game development. Holding piles
+// follow Klondike: build down, alternate families, empty pile takes a ★.
 
 import {
   Card,
@@ -17,6 +17,10 @@ import {
 } from './cards';
 
 export const HOLDING_PILES = 7;
+export const YARD_PILES = 8;
+export const RECALL_AT_OWNED = 1;
+export const YARD_AT_OWNED = 2;
+export const CREW_AT_OWNED = 3;
 
 export type PileRef =
   | { type: 'stock' }
@@ -35,7 +39,35 @@ export interface GameState {
 }
 
 export const SCORE_PER_FIELD_CARD = 10;
-export const SCORE_SUIT_BONUS = 100;
+export const SCORE_DEED = 150;
+
+export type Tenure = 'vacant' | 'leased' | 'owned';
+
+export function fieldTenure(field: Card[]): Tenure {
+  if (field.length === 0) return 'vacant';
+  if (field.length >= RANK_MAX) return 'owned';
+  return 'leased';
+}
+
+export function ownedFarms(state: GameState): number {
+  return SUITS.filter((suit) => fieldTenure(state.fields[suit]) === 'owned').length;
+}
+
+export function leasedFields(state: GameState): number {
+  return SUITS.filter((suit) => fieldTenure(state.fields[suit]) === 'leased').length;
+}
+
+export function canRecallFromLease(state: GameState): boolean {
+  return ownedFarms(state) >= RECALL_AT_OWNED;
+}
+
+export function hasYard(state: GameState): boolean {
+  return ownedFarms(state) >= YARD_AT_OWNED;
+}
+
+export function hasCrew(state: GameState): boolean {
+  return ownedFarms(state) >= CREW_AT_OWNED;
+}
 
 export function emptyFields(): Record<Suit, Card[]> {
   return { grain: [], orchard: [], livestock: [], equipment: [] };
@@ -153,14 +185,19 @@ export function getMovableCards(state: GameState, cardId: string): Card[] | null
     return isValidRun(run) ? run : null;
   }
   if (index !== arr.length - 1) return null;
+  if (ref.type === 'field') {
+    if (fieldTenure(arr) === 'owned') return null;
+    if (!canRecallFromLease(state)) return null;
+  }
   return arr[index].faceUp ? [arr[index]] : null;
 }
 
 export function validTargets(state: GameState, cardId: string): PileRef[] {
   const moving = getMovableCards(state, cardId);
   if (!moving) return [];
+  const located = findCard(state, cardId);
   const targets: PileRef[] = [];
-  if (moving.length === 1 && canPlaceOnField(moving[0], state.fields[moving[0].suit])) {
+  if (located?.ref.type !== 'field' && moving.length === 1 && canPlaceOnField(moving[0], state.fields[moving[0].suit])) {
     targets.push({ type: 'field', suit: moving[0].suit });
   }
   for (let i = 0; i < state.holding.length; i++) {
@@ -171,12 +208,20 @@ export function validTargets(state: GameState, cardId: string): PileRef[] {
   return targets;
 }
 
-function canMoveTo(state: GameState, moving: Card[], dest: PileRef): boolean {
+function canMoveTo(state: GameState, moving: Card[], dest: PileRef, source: PileRef): boolean {
   if (dest.type === 'stock' || dest.type === 'waste') return false;
   if (dest.type === 'field') {
+    if (source.type === 'field') return false;
     return moving.length === 1 && dest.suit === moving[0].suit && canPlaceOnField(moving[0], state.fields[dest.suit]);
   }
+  if (source.type === 'field' && !canRecallFromLease(state)) return false;
   return canStackOnHold(moving[0], topOf(state.holding[dest.index]));
+}
+
+function syncDevelopment(state: GameState): void {
+  if (hasYard(state) && state.holding.length < YARD_PILES) {
+    state.holding.push([]);
+  }
 }
 
 export function moveCards(state: GameState, cardId: string, dest: PileRef): boolean {
@@ -185,7 +230,7 @@ export function moveCards(state: GameState, cardId: string, dest: PileRef): bool
   if (samePile(located.ref, dest)) return false;
   const moving = getMovableCards(state, cardId);
   if (!moving) return false;
-  if (!canMoveTo(state, moving, dest)) return false;
+  if (!canMoveTo(state, moving, dest, located.ref)) return false;
 
   const source = pileArray(state, located.ref);
   source.splice(located.index, moving.length);
@@ -194,7 +239,10 @@ export function moveCards(state: GameState, cardId: string, dest: PileRef): bool
 
   if (dest.type === 'field') {
     state.score += SCORE_PER_FIELD_CARD;
-    if (state.fields[dest.suit].length === RANK_MAX) state.score += SCORE_SUIT_BONUS;
+    if (fieldTenure(state.fields[dest.suit]) === 'owned') {
+      state.score += SCORE_DEED;
+      syncDevelopment(state);
+    }
   }
 
   state.moves++;
@@ -231,26 +279,131 @@ export function drawFromStock(state: GameState): boolean {
   return false;
 }
 
+/** F and 2s always go up. Higher ranks only if opposite-family (rank-1) are already leased that far. */
+export function isSafeFieldPlay(state: GameState, card: Card): boolean {
+  if (card.rank <= 2) return true;
+  const need = card.rank - 1;
+  return SUITS.filter((suit) => familyOf(suit) !== familyOf(card.suit)).every(
+    (suit) => (topOf(state.fields[suit])?.rank ?? 0) >= need,
+  );
+}
+
+function fieldCandidates(state: GameState): Card[] {
+  const cards: Card[] = [];
+  const wasteTop = topOf(state.waste);
+  if (wasteTop) cards.push(wasteTop);
+  for (const pile of state.holding) {
+    const top = topOf(pile);
+    if (top?.faceUp) cards.push(top);
+  }
+  return cards;
+}
+
+/** Optimal-play auto: only safe promotions (F, 2, then safe higher ranks). */
 export function autoPlayFields(state: GameState): number {
   let moved = 0;
   let progress = true;
   while (progress) {
     progress = false;
-    const ids: string[] = [];
-    const wasteTop = topOf(state.waste);
-    if (wasteTop) ids.push(wasteTop.id);
-    for (const pile of state.holding) {
-      const top = topOf(pile);
-      if (top?.faceUp) ids.push(top.id);
-    }
-    for (const id of ids) {
-      if (sendToField(state, id)) {
+    for (const card of fieldCandidates(state)) {
+      if (!isSafeFieldPlay(state, card)) continue;
+      if (sendToField(state, card.id)) {
         moved++;
         progress = true;
+        break;
       }
     }
   }
   return moved;
+}
+
+export function developAfterMove(state: GameState): void {
+  syncDevelopment(state);
+  if (hasCrew(state)) autoPlayFields(state);
+}
+
+export function harvestReady(state: GameState): boolean {
+  if (topOf(state.waste)?.rank === RANK_MAX) return true;
+  return state.holding.some((pile) => topOf(pile)?.rank === RANK_MAX);
+}
+
+export function wouldFlip(state: GameState, cardId: string): boolean {
+  const located = findCard(state, cardId);
+  if (!located || located.ref.type !== 'hold' || located.index === 0) return false;
+  return !state.holding[located.ref.index][located.index - 1].faceUp;
+}
+
+export function emptiesHold(state: GameState, cardId: string): boolean {
+  const located = findCard(state, cardId);
+  return Boolean(located && located.ref.type === 'hold' && located.index === 0);
+}
+
+export interface Advice {
+  text: string;
+  cardId?: string;
+  dest?: PileRef;
+}
+
+function everyMovableId(state: GameState): string[] {
+  const ids: string[] = [];
+  const wasteTop = topOf(state.waste);
+  if (wasteTop) ids.push(wasteTop.id);
+  for (const suit of SUITS) {
+    const top = topOf(state.fields[suit]);
+    if (top) ids.push(top.id);
+  }
+  for (const pile of state.holding) {
+    for (const card of pile) {
+      if (card.faceUp) ids.push(card.id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Klondike-style advice: flip buried cards first, play F/2, don't vacate
+ * a hold without a ★, and only promote mid-ranks when it is safe.
+ */
+export function advise(state: GameState): Advice {
+  const ids = everyMovableId(state);
+  const flips: { cardId: string; dest: PileRef }[] = [];
+  const leases: { cardId: string; dest: PileRef }[] = [];
+  const safe: { cardId: string; dest: PileRef }[] = [];
+  const holds: { cardId: string; dest: PileRef }[] = [];
+
+  for (const cardId of ids) {
+    const moving = getMovableCards(state, cardId);
+    if (!moving) continue;
+    for (const dest of validTargets(state, cardId)) {
+      if (emptiesHold(state, cardId) && dest.type !== 'hold' && !harvestReady(state)) continue;
+      if (wouldFlip(state, cardId)) flips.push({ cardId, dest });
+      else if (dest.type === 'field' && moving[0].rank === FIELD_RANK) leases.push({ cardId, dest });
+      else if (dest.type === 'field' && isSafeFieldPlay(state, moving[0])) safe.push({ cardId, dest });
+      else if (dest.type === 'hold') holds.push({ cardId, dest });
+    }
+  }
+
+  if (flips[0]) {
+    return { text: 'Turn a buried card — that is the best Klondike play.', ...flips[0] };
+  }
+  if (leases[0]) {
+    return { text: 'Lease this Field (F). Aces go up immediately.', ...leases[0] };
+  }
+  if (safe[0]) {
+    return {
+      text: safe[0] && getMovableCards(state, safe[0].cardId)?.[0].rank === 2
+        ? 'Play the 2 onto the lease. Twos almost never help the holding set.'
+        : 'Safe to build the lease — opposite-family ranks below are already up.',
+      ...safe[0],
+    };
+  }
+  if (holds[0]) {
+    return { text: 'Park it in the holding set. Keep mid-ranks off the lease until they are safe.', ...holds[0] };
+  }
+  if (state.stock.length || state.waste.length) {
+    return { text: 'No improving move. Draw from the stock (or recycle the waste).' };
+  }
+  return { text: 'No legal play left. Start a new farm, or undo by recalling from a lease if you own one.' };
 }
 
 export function isWon(state: GameState): boolean {

@@ -17,6 +17,13 @@ import {
   isWon,
   topOf,
   emptyFields,
+  fieldTenure,
+  ownedFarms,
+  isSafeFieldPlay,
+  canRecallFromLease,
+  hasYard,
+  hasCrew,
+  advise,
 } from './rules';
 
 function card(suit: Suit, rank: number, faceUp = true): Card {
@@ -86,16 +93,32 @@ describe('field stacks (14-card suits)', () => {
     expect(canPlaceOnField(card('orchard', 3), field)).toBe(false);
   });
 
-  it('playing a Field from waste sets that plot, then the next rank', () => {
+  it('playing a Field from waste leases that plot, then the next rank', () => {
     const s = state({
       waste: [card('livestock', 1)],
     });
     expect(sendToField(s, 'livestock-1')).toBe(true);
-    expect(s.fields.livestock).toHaveLength(1);
+    expect(fieldTenure(s.fields.livestock)).toBe('leased');
     expect(s.fields.livestock[0].rank).toBe(1);
     s.waste.push(card('livestock', 2));
     expect(sendToField(s, 'livestock-2')).toBe(true);
     expect(s.fields.livestock.map((c) => c.rank)).toEqual([1, 2]);
+    expect(ownedFarms(s)).toBe(0);
+  });
+
+  it('completing a 14-card suit owns the farm', () => {
+    const s = state({
+      waste: [card('grain', 14)],
+      fields: {
+        ...emptyFields(),
+        grain: Array.from({ length: 13 }, (_, i) => card('grain', i + 1)),
+      },
+    });
+    expect(fieldTenure(s.fields.grain)).toBe('leased');
+    expect(sendToField(s, 'grain-14')).toBe(true);
+    expect(fieldTenure(s.fields.grain)).toBe('owned');
+    expect(ownedFarms(s)).toBe(1);
+    expect(canRecallFromLease(s)).toBe(true);
   });
 });
 
@@ -170,22 +193,96 @@ describe('stock, waste, and legal grabs', () => {
   });
 });
 
-describe('auto-play and win', () => {
-  it('autoPlayFields walks sequential cards onto their fields', () => {
+describe('auto-play, tenure, and optimal play', () => {
+  it('autoPlayFields only promotes F and 2s (safe Klondike plays)', () => {
     const s = state({
       waste: [card('grain', 1)],
-      holding: [[card('grain', 2)], [], [], [], [], [], []],
+      holding: [[card('grain', 2)], [card('grain', 3)], [], [], [], [], []],
     });
     expect(autoPlayFields(s)).toBe(2);
     expect(s.fields.grain.map((c) => c.rank)).toEqual([1, 2]);
+    expect(s.holding[1]).toHaveLength(1);
   });
 
-  it('is won only when every 14-card suit sits on its field', () => {
+  it('a mid-rank is not safe until opposite-family ranks below are up', () => {
+    const s = state({
+      fields: {
+        ...emptyFields(),
+        grain: [card('grain', 1), card('grain', 2)],
+      },
+    });
+    expect(isSafeFieldPlay(s, card('grain', 3))).toBe(false);
+    s.fields.livestock = [card('livestock', 1), card('livestock', 2)];
+    s.fields.equipment = [card('equipment', 1), card('equipment', 2)];
+    expect(isSafeFieldPlay(s, card('grain', 3))).toBe(true);
+  });
+
+  it('cannot recall from a lease until one farm is owned', () => {
+    const s = state({
+      fields: { ...emptyFields(), grain: [card('grain', 1), card('grain', 2)] },
+      holding: [[card('livestock', 3)], [], [], [], [], [], []],
+    });
+    expect(canRecallFromLease(s)).toBe(false);
+    expect(getMovableCards(s, 'grain-2')).toBeNull();
+    s.fields.orchard = Array.from({ length: RANK_MAX }, (_, i) => card('orchard', i + 1));
+    expect(canRecallFromLease(s)).toBe(true);
+    expect(moveCards(s, 'grain-2', { type: 'hold', index: 0 })).toBe(true);
+    expect(s.fields.grain).toHaveLength(1);
+  });
+
+  it('the second owned farm opens an extra yard pile', () => {
+    const s = state({
+      waste: [card('livestock', 14)],
+      fields: {
+        grain: Array.from({ length: RANK_MAX }, (_, i) => card('grain', i + 1)),
+        orchard: Array.from({ length: 13 }, (_, i) => card('orchard', i + 1)),
+        livestock: Array.from({ length: 13 }, (_, i) => card('livestock', i + 1)),
+        equipment: [],
+      },
+    });
+    expect(hasYard(s)).toBe(false);
+    expect(sendToField(s, 'livestock-14')).toBe(true);
+    expect(ownedFarms(s)).toBe(2);
+    expect(hasYard(s)).toBe(true);
+    expect(s.holding).toHaveLength(8);
+  });
+
+  it('the third owned farm turns the crew on', () => {
+    const s = state({
+      fields: {
+        grain: Array.from({ length: RANK_MAX }, (_, i) => card('grain', i + 1)),
+        orchard: Array.from({ length: RANK_MAX }, (_, i) => card('orchard', i + 1)),
+        livestock: Array.from({ length: RANK_MAX }, (_, i) => card('livestock', i + 1)),
+        equipment: [],
+      },
+    });
+    expect(hasCrew(s)).toBe(true);
+  });
+
+  it('advise prefers a move that flips a buried card', () => {
+    const s = state({
+      holding: [
+        [card('equipment', 4, false), card('grain', 10)],
+        [card('livestock', 11)],
+        [],
+        [],
+        [],
+        [],
+        [],
+      ],
+    });
+    const tip = advise(s);
+    expect(tip.cardId).toBe('grain-10');
+    expect(tip.text).toMatch(/buried/);
+  });
+
+  it('is won only when every farm is owned', () => {
     const s = state();
     expect(isWon(s)).toBe(false);
     for (const suit of ['grain', 'orchard', 'livestock', 'equipment'] as Suit[]) {
       s.fields[suit] = Array.from({ length: RANK_MAX }, (_, i) => card(suit, i + 1));
     }
     expect(isWon(s)).toBe(true);
+    expect(ownedFarms(s)).toBe(4);
   });
 });

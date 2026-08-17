@@ -34,7 +34,7 @@ describe('AGRITAIRE solitaire UI', () => {
     expect(root.querySelectorAll('.hold-col')).toHaveLength(7);
     expect(root.querySelectorAll('.hold-col .card, .hold-col .card--back').length).toBeGreaterThan(7);
     expect(root.querySelector('[data-action="draw"]')).toBeTruthy();
-    expect(root.textContent).toMatch(/Play a/);
+    expect(root.textContent).toMatch(/Lease|holding|Field/);
   });
 
   it('selecting a face-up holding card highlights it', () => {
@@ -57,7 +57,7 @@ describe('AGRITAIRE solitaire UI', () => {
     expect(suit).toBeTruthy();
     click(suit);
     expect(root.querySelector('.field-slot .card--plot')).toBeTruthy();
-    expect(root.textContent).toMatch(/1\/14/);
+    expect(root.textContent).toMatch(/Leased 1\/14/);
   });
 
   it('New Farm restores empty fields and a fresh holding set', () => {

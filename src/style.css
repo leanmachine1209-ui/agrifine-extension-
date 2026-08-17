@@ -142,8 +142,17 @@ body {
   box-shadow: 0 0 0 2px #22c55e inset;
   background: rgba(34, 197, 94, 0.22);
 }
-.field-slot.is-done {
+.field-slot.is-leased {
   border-color: #fbbf24;
+  background: rgba(254, 243, 199, 0.95);
+}
+.field-slot.is-owned,
+.field-slot:has(.card--plot):not(.is-leased) {
+  border-color: #15803d;
+  background: rgba(220, 252, 231, 0.95);
+}
+.field-slot.is-owned {
+  box-shadow: 0 0 0 2px #16a34a inset;
 }
 
 .upkeep {
@@ -423,5 +432,9 @@ body {
   }
   .hold-col.has-cards {
     background: transparent;
+  }
+  .field-slot.is-owned {
+    border-color: #15803d;
+    background: rgba(220, 252, 231, 0.95);
   }
 }
